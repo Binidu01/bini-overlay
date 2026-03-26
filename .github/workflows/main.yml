@@ -7,8 +7,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  id-token: write
+  contents: write       # For GitHub release & tag creation
+  id-token: write       # REQUIRED for OIDC Trusted Publishing
+  packages: write       # Needed to publish to npm
 
 jobs:
   release:
@@ -28,6 +29,9 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org/
 
+      - name: Ensure latest npm
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         run: npm install
 
@@ -41,28 +45,16 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Detected version: $VERSION"
 
-      - name: Skip if tag already exists
-        id: check_tag
-        run: |
-          TAG="v${{ steps.pkg.outputs.version }}"
-          if git ls-remote --tags origin | grep -q "refs/tags/$TAG$"; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Tag $TAG already exists — skipping release."
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create Git Tag
-        if: steps.check_tag.outputs.exists == 'false'
+      - name: Create Git Tag (force if needed)
         run: |
           TAG="v${{ steps.pkg.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$TAG"
-          git push origin "$TAG"
+          git tag -f "$TAG"
+          git push origin "$TAG" --force
+          git push origin main --force
 
       - name: Create GitHub Release
-        if: steps.check_tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ steps.pkg.outputs.version }}"
@@ -72,7 +64,6 @@ jobs:
           generate_release_notes: true
 
       - name: Publish to npm via OIDC
-        if: steps.check_tag.outputs.exists == 'false'
         run: npm publish --access public
         env:
           NPM_CONFIG_PROVENANCE: true
