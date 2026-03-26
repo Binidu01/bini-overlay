@@ -1,0 +1,73 @@
+{
+  "name": "bini-overlay",
+  "version": "1.0.7",
+  "description": "Next.js-style error overlay and animated loading badge for Bini.js / Vite",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "vite",
+    "vite-plugin",
+    "bini",
+    "bini-js",
+    "bini.js",
+    "overlay",
+    "error-overlay",
+    "hmr",
+    "badge",
+    "animation",
+    "development",
+    "nextjs-style",
+    "typescript",
+    "runtime-errors"
+  ],
+  "author": "Binidu Ranasinghe",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Binidu01/bini-overlay.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Binidu01/bini-overlay/issues"
+  },
+  "homepage": "https://bini.js.org",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "peerDependencies": {
+    "vite": ">=7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.8.3",
+    "vite": "^8.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "shiki": "^4.0.2"
+  }
+}

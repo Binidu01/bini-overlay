@@ -1,0 +1,38 @@
+# Source
+src/
+
+# Config files
+tsconfig.json
+tsup.config.ts
+.gitignore
+.npmignore
+
+# Logs
+*.log
+
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.*
+
+# Editor
+.vscode/
+.idea/
+
+# TypeScript
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests
+**/*.test.ts
+**/*.spec.ts
+
+# Package manager locks
+yarn.lock
+pnpm-lock.yaml
+package-lock.json
