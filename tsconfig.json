@@ -1,34 +1,46 @@
 {
   "compilerOptions": {
-    "target"                          : "ES2022",
-    "module"                          : "ESNext",
-    "lib"                             : ["ES2022", "DOM"],
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM"],
 
-    "moduleResolution"                : "bundler",
-    "resolveJsonModule"               : true,
+    // 🔥 Critical for modern bundlers (Vite/Rollup)
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": false,
 
-    "declaration"                     : true,
-    "declarationDir"                  : "./dist",
-    "emitDeclarationOnly"             : false,
-    "outDir"                          : "./dist",
-    "rootDir"                         : "./src",
+    // 🔥 Output
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
+    "outDir": "./dist",
+    "rootDir": "./src",
 
-    "strict"                          : true,
-    "noUncheckedIndexedAccess"        : false,
-    "noImplicitOverride"              : true,
-    "noUnusedLocals"                  : false,
-    "noUnusedParameters"              : false,
+    // 🔥 Strictness (you were going soft here)
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
 
-    "esModuleInterop"                 : true,
-    "verbatimModuleSyntax"            : false,
-    "isolatedModules"                 : true,
+    // 🔥 Clean code hygiene
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
 
-    "skipLibCheck"                    : true,
+    // 🔥 Interop (safe defaults)
+    "esModuleInterop": true,
+    "verbatimModuleSyntax": true,
+
+    // 🔥 Required for Vite + TS correctness
+    "isolatedModules": true,
+
+    // 🔥 Stability
+    "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 
-    "sourceMap"                       : true,
-    "declarationMap"                  : true
+    // 🔥 Debugging
+    "sourceMap": true
   },
+
   "include": ["src"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
 }

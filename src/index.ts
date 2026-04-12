@@ -3,20 +3,30 @@ import type {
   PluginOption,
   HtmlTagDescriptor,
   IndexHtmlTransformContext,
+  ViteDevServer,
 } from 'vite';
-import { createHighlighter, type Highlighter } from 'shiki';
 import fs from 'fs';
 import path from 'path';
+import type { IncomingMessage, ServerResponse } from 'http';
 
 // ─────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────
 export interface BiniOverlayOptions {
-  typescript?: boolean;
-  eslint?: boolean | { lintCommand: string };
-  customStyles?: boolean;
-  disableAnimation?: boolean;
-  shikiTheme?: string; // 'dark-plus', 'github-dark', etc.
+  shikiTheme?: string;
+}
+
+interface BiniPlugin extends Plugin {
+  name: string;
+  apply?: 'serve' | 'build' | ((this: void, config: any, env: any) => boolean);
+}
+
+interface RouteInfo {
+  method: string;
+  path: string;
+  file: string;
+  type: 'static' | 'dynamic';
+  pattern?: string;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -41,11 +51,11 @@ const CHECK_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" 
 const CLOSE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 const PREV_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.24996 12.0608L8.71963 11.5304L5.89641 8.70722C5.50588 8.3167 5.50588 7.68353 5.89641 7.29301L8.71963 4.46978L9.24996 3.93945L10.3106 5.00011L9.78029 5.53044L7.31062 8.00011L9.78029 10.4698L10.3106 11.0001L9.24996 12.0608Z" fill="currentColor"/></svg>`;
 const NEXT_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.75011 3.93945L7.28044 4.46978L10.1037 7.29301C10.4942 7.68353 10.4942 8.3167 10.1037 8.70722L7.28044 11.5304L6.75011 12.0608L5.68945 11.0001L6.21978 10.4698L8.68945 8.00011L6.21978 5.53044L5.68945 5.00011L6.75011 3.93945Z" fill="currentColor"/></svg>`;
+const CHEVRON_RIGHT = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none"><path fill="#666" fill-rule="evenodd" clip-rule="evenodd" d="M5.50011 1.93945L6.03044 2.46978L10.8537 7.293C11.2442 7.68353 11.2442 8.31669 10.8537 8.70722L6.03044 13.5304L5.50011 14.0608L4.43945 13.0001L4.96978 12.4698L9.43945 8.00011L4.96978 3.53044L4.43945 3.00011L5.50011 1.93945Z"></path></svg>`;
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
-
 function isDev(ctx: IndexHtmlTransformContext): boolean {
   return !!ctx.server;
 }
@@ -64,9 +74,9 @@ function scriptTag(
 }
 
 // ─────────────────────────────────────────────────────────────
-// PLUGIN 1 — HMR loading badge (idle, loading, error states)
+// PLUGIN 1 — HMR loading badge with menu
 // ─────────────────────────────────────────────────────────────
-function biniLoadingPlugin(): Plugin {
+function biniLoadingPlugin(): BiniPlugin {
   return {
     name: 'bini-overlay:loading',
     apply: 'serve',
@@ -78,190 +88,327 @@ function biniLoadingPlugin(): Plugin {
       ): string | HtmlTagDescriptor[] {
         if (!isDev(ctx)) return html;
 
-        const js = [
-          '(function () {',
-          '  if (document.getElementById("bini-loading-root")) return;',
-          '  var container = document.createElement("div");',
-          '  container.id = "bini-loading-root";',
-          '  document.body.appendChild(container);',
-          '  var sr = container.attachShadow({ mode: "open" });',
-          '  sr.id = "bini-loading-shadow";',
-          '',
-          '  var style = document.createElement("style");',
-          '  style.textContent = [',
-          '    ":host { all: initial; display: block; }",',
-          // ── idle circle ──────────────────────────────────────
-          '    "#w {",',
-          '    "  position: fixed; bottom: 20px; left: 20px;",',
-          '    "  width: 48px; height: 48px;",',
-          '    "  display: flex; align-items: center; justify-content: center;",',
-          '    "  z-index: 99999; border-radius: 50%;",',
-          '    "  background: #0a0a0a;",',
-          '    "  backdrop-filter: blur(10px);",',
-          '    "  border: 1px solid rgba(255,255,255,0.1);",',
-          '    "  box-shadow: 0 4px 20px rgba(0,0,0,0.5);",',
-          '    "  pointer-events: none;",',
-          '    "  transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1);",',
-          '    "  overflow: hidden;",',
-          '    "}",',
-          // ── error pill state (smaller version) ──
-          '    "#w.has-errors {",',
-          '    "  width: auto; border-radius: 999px;",',
-          '    "  background: #dc2626;",',
-          '    "  border: none;",',
-          '    "  box-shadow: 0 4px 20px rgba(220,38,38,0.4), 0 2px 6px rgba(0,0,0,0.3);",',
-          '    "  pointer-events: auto; cursor: pointer;",',
-          '    "  padding: 0;",',
-          '    "  gap: 0;",',
-          '    "  height: 40px;",',
-          '    "}",',
-          // ── bini logos ───────────────────────────────────────
-          '    ".bf, .bs { position: absolute; width: 20px; height: auto; transition: opacity .25s; }",',
-          '    ".bf { opacity: 1; }",',
-          '    ".bs { opacity: 0; }",',
-          '    "#w.loading .bf { opacity: 0; }",',
-          '    "#w.loading .bs { opacity: 1; }",',
-          '    "#w.has-errors .bf { opacity: 0; }",',
-          '    "#w.has-errors .bs { opacity: 0; }",',
-          // ── error pill inner content (smaller) ──
-          '    ".ep {",',
-          '    "  display: none; align-items: center; gap: 0;",',
-          '    "  opacity: 0; transition: opacity 0.2s;",',
-          '    "  height: 40px;",',
-          '    "}",',
-          '    "#w.has-errors .ep { display: flex; opacity: 1; }",',
-          '    ".ep-icon {",',
-          '    "  width: 40px; height: 40px;",',
-          '    "  background: rgba(0,0,0,0.4);",',
-          '    "  border-radius: 50%;",',
-          '    "  display: flex; align-items: center; justify-content: center;",',
-          '    "  flex-shrink: 0;",',
-          '    "  margin: 0;",',
-          '    "}",',
-          '    ".ep-content {",',
-          '    "  display: flex; align-items: baseline; gap: 6px;",',
-          '    "  padding: 0 14px 0 6px;",',
-          '    "}",',
-          '    ".ep-count {",',
-          '    "  font-family: system-ui, -apple-system, sans-serif;",',
-          '    "  font-size: 20px;",',
-          '    "  font-weight: 700;",',
-          '    "  color: #fff;",',
-          '    "  line-height: 1;",',
-          '    "}",',
-          '    ".ep-label {",',
-          '    "  font-family: system-ui, -apple-system, sans-serif;",',
-          '    "  font-size: 17px;",',
-          '    "  font-weight: 700;",',
-          '    "  color: #fff;",',
-          '    "  white-space: nowrap;",',
-          '    "  letter-spacing: -0.01em;",',
-          '    "  line-height: 1;",',
-          '    "}",',
-          // ── stroke animation ─────────────────────────────────
-          '    ".bsp {",',
-          '    "  fill: none; stroke: url(#sg); stroke-width: 1.4;",',
-          '    "  stroke-linecap: round; stroke-linejoin: round;",',
-          '    "  stroke-dasharray: 300; stroke-dashoffset: 300;",',
-          '    "}",',
-          '    "#w.loading .bsp { animation: draw 1.3s ease-out .1s forwards; }",',
-          '    "@keyframes draw { from { stroke-dashoffset: 300; } to { stroke-dashoffset: 0; } }"',
-          '  ].join("\\n");',
-          '',
-          '  var biniPath = "' + BINI_PATH + '";',
-          '  var w = document.createElement("div");',
-          '  w.id = "w";',
-          '  w.className = "loading";',
-          '  w.innerHTML =',
-          // idle filled logo
-          '    "<svg class=\\"bf\\" width=\\"20\\" height=\\"28\\" viewBox=\\"0 0 22 31\\" fill=\\"none\\">"',
-          '    + "<defs><linearGradient id=\\"fg\\" x1=\\"9.96\\" y1=\\"-12.92\\" x2=\\"9.96\\" y2=\\"40.08\\" gradientUnits=\\"userSpaceOnUse\\">"',
-          '    + "<stop stop-color=\\"#00CFFF\\"/><stop offset=\\"1\\" stop-color=\\"#0077FF\\"/>"',
-          '    + "</linearGradient></defs>"',
-          '    + "<path fill=\\"url(#fg)\\" d=\\"" + biniPath + "\\"/></svg>"',
-          // stroke animation logo
-          '    + "<svg class=\\"bs\\" width=\\"20\\" height=\\"28\\" viewBox=\\"0 0 22 31\\" fill=\\"none\\">"',
-          '    + "<defs><linearGradient id=\\"sg\\" x1=\\"9.96\\" y1=\\"-12.92\\" x2=\\"9.96\\" y2=\\"40.08\\" gradientUnits=\\"userSpaceOnUse\\">"',
-          '    + "<stop stop-color=\\"#00CFFF\\"/><stop offset=\\"1\\" stop-color=\\"#0077FF\\"/>"',
-          '    + "</linearGradient></defs>"',
-          '    + "<path class=\\"bsp\\" d=\\"" + biniPath + "\\"/></svg>"',
-          // error pill content with separate icon background
-          '    + "<div class=\\"ep\\">"',
-          '    + "<span class=\\"ep-icon\\">"',
-          '    + "<svg width=\\"20\\" height=\\"28\\" viewBox=\\"0 0 22 31\\" fill=\\"none\\">"',
-          '    + "<path fill=\\"#fff\\" d=\\"" + biniPath + "\\"/>"',
-          '    + "</svg>"',
-          '    + "</span>"',
-          '    + "<div class=\\"ep-content\\">"',
-          '    + "<span class=\\"ep-count\\" id=\\"bini-err-count\\">1</span>"',
-          '    + "<span class=\\"ep-label\\" id=\\"bini-err-label\\">Issue</span>"',
-          '    + "</div>"',
-          '    + "</div>";',
-          '',
-          '  sr.appendChild(style);',
-          '  sr.appendChild(w);',
-          '',
-          '  var el = sr.getElementById("w");',
-          '  var sp = el.querySelector(".bsp");',
-          '  var countEl = sr.getElementById("bini-err-count");',
-          '  var labelEl = sr.getElementById("bini-err-label");',
-          '  var animDone = false, ready = false, timer = null;',
-          '',
-          '  // ── expose error count API to error plugin ──',
-          '  window.__bini_set_error_count = function(count) {',
-          '    if (countEl) countEl.textContent = count;',
-          '    if (labelEl) labelEl.textContent = count === 1 ? "Issue" : "Issues";',
-          '    if (count > 0) {',
-          '      el.classList.add("has-errors");',
-          '      el.classList.remove("loading");',
-          '    } else {',
-          '      el.classList.remove("has-errors");',
-          '    }',
-          '  };',
-          '',
-          '  function idle() { clearTimeout(timer); timer = null; if (!el.classList.contains("has-errors")) el.classList.remove("loading"); }',
-          '  function loop() {',
-          '    if (ready) return;',
-          '    animDone = false;',
-          '    sp.style.animation = "none";',
-          '    sp.offsetHeight;',
-          '    sp.style.strokeDashoffset = "300";',
-          '    requestAnimationFrame(function () {',
-          '      requestAnimationFrame(function () {',
-          '        sp.style.animation = "";',
-          '        if (!el.classList.contains("has-errors")) el.classList.add("loading");',
-          '      });',
-          '    });',
-          '    timer = setTimeout(function () { if (!ready) loop(); }, 2000);',
-          '  }',
-          '  function start() {',
-          '    animDone = false; ready = false;',
-          '    loop();',
-          '    timer = setTimeout(function () { ready = true; if (animDone) idle(); }, 1800);',
-          '  }',
-          '  sp.addEventListener("animationend", function (e) {',
-          '    if (e.animationName !== "draw") return;',
-          '    animDone = true;',
-          '    clearTimeout(timer); timer = null;',
-          '    if (ready) idle(); else loop();',
-          '  });',
-          '  function onReady() { ready = true; clearTimeout(timer); timer = null; if (animDone) idle(); }',
-          '  if (document.readyState === "complete") { onReady(); }',
-          '  else { window.addEventListener("load", onReady, { once: true }); }',
-          '',
-          '  // ── click pill to re-open overlay ──',
-          '  el.addEventListener("click", function() {',
-          '    if (el.classList.contains("has-errors") && window.__bini_show_overlay) {',
-          '      window.__bini_show_overlay();',
-          '    }',
-          '  });',
-          '',
-          '  if (import.meta.hot) {',
-          '    import.meta.hot.on("vite:beforeUpdate", start);',
-          '    import.meta.hot.on("vite:afterUpdate", function () { ready = true; if (animDone) idle(); });',
-          '  }',
-          '})();',
-        ].join('\n');
+        const js = `
+(function () {
+  if (document.getElementById("bini-loading-root")) return;
+  var container = document.createElement("div");
+  container.id = "bini-loading-root";
+  document.body.appendChild(container);
+  var sr = container.attachShadow({ mode: "open" });
+  sr.id = "bini-loading-shadow";
+
+  var style = document.createElement("style");
+  style.textContent = [
+    ":host { all: initial; display: block; }",
+    "#w {",
+    "  position: fixed; bottom: 20px; left: 20px;",
+    "  width: 48px; height: 48px;",
+    "  display: flex; align-items: center; justify-content: center;",
+    "  z-index: 2147483647; border-radius: 50%;",
+    "  background: #0a0a0a;",
+    "  backdrop-filter: blur(10px);",
+    "  border: 1px solid rgba(255,255,255,0.1);",
+    "  box-shadow: 0 4px 20px rgba(0,0,0,0.5);",
+    "  pointer-events: auto; cursor: pointer;",
+    "  transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1);",
+    "  overflow: hidden;",
+    "}",
+    "#w.has-errors {",
+    "  width: auto; border-radius: 999px;",
+    "  background: #dc2626;",
+    "  border: none;",
+    "  box-shadow: 0 4px 20px rgba(220,38,38,0.4), 0 2px 6px rgba(0,0,0,0.3);",
+    "  padding: 0;",
+    "  gap: 0;",
+    "  height: 40px;",
+    "}",
+    ".bf, .bs { position: absolute; width: 20px; height: auto; transition: opacity .25s; }",
+    ".bf { opacity: 1; }",
+    ".bs { opacity: 0; }",
+    "#w.loading .bf { opacity: 0; }",
+    "#w.loading .bs { opacity: 1; }",
+    "#w.has-errors .bf { opacity: 0; }",
+    "#w.has-errors .bs { opacity: 0; }",
+    ".ep {",
+    "  display: none; align-items: center; gap: 0;",
+    "  opacity: 0; transition: opacity 0.2s;",
+    "  height: 40px;",
+    "}",
+    "#w.has-errors .ep { display: flex; opacity: 1; }",
+    ".ep-icon {",
+    "  width: 40px; height: 40px;",
+    "  background: rgba(0,0,0,0.4);",
+    "  border-radius: 50%;",
+    "  display: flex; align-items: center; justify-content: center;",
+    "  flex-shrink: 0;",
+    "  margin: 0;",
+    "}",
+    ".ep-content {",
+    "  display: flex; align-items: baseline; gap: 6px;",
+    "  padding: 0 14px 0 6px;",
+    "}",
+    ".ep-count {",
+    "  font-family: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;",
+    "  font-size: 20px;",
+    "  font-weight: 700;",
+    "  color: #fff;",
+    "  line-height: 1;",
+    "}",
+    ".ep-label {",
+    "  font-family: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;",
+    "  font-size: 17px;",
+    "  font-weight: 700;",
+    "  color: #fff;",
+    "  white-space: nowrap;",
+    "  letter-spacing: -0.01em;",
+    "  line-height: 1;",
+    "}",
+    ".bsp {",
+    "  fill: none; stroke: url(#sg); stroke-width: 1.4;",
+    "  stroke-linecap: round; stroke-linejoin: round;",
+    "  stroke-dasharray: 300; stroke-dashoffset: 300;",
+    "}",
+    "#w.loading .bsp { animation: draw 1.3s ease-out .1s forwards; }",
+    "@keyframes draw { from { stroke-dashoffset: 300; } to { stroke-dashoffset: 0; } }",
+    "",
+    "#bini-menu {",
+    "  position: fixed; bottom: 80px; left: 20px;",
+    "  min-width: 248px;",
+    "  background: #0a0a0a;",
+    "  border: 1px solid rgba(255,255,255,0.15);",
+    "  border-radius: 12px;",
+    "  box-shadow: 0 8px 30px rgba(0,0,0,0.6);",
+    "  z-index: 2147483647;",
+    "  display: none;",
+    "  overflow: hidden;",
+    "  font-family: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;",
+    "  padding: 6px;",
+    "}",
+    "#bini-menu.show { display: block; }",
+    ".bini-menu-item {",
+    "  display: flex; align-items: center; justify-content: space-between;",
+    "  padding: 8px 12px;",
+    "  border-radius: 6px;",
+    "  cursor: default;",
+    "  transition: background 0.15s;",
+    "}",
+    ".bini-menu-item:hover { background: rgba(255,255,255,0.06); }",
+    ".bini-menu-item-clickable { cursor: pointer; }",
+    ".bini-menu-label {",
+    "  color: #a1a1aa;",
+    "  font-size: 13px;",
+    "  font-weight: 400;",
+    "}",
+    ".bini-menu-value {",
+    "  color: #e4e4e7;",
+    "  font-size: 13px;",
+    "  font-weight: 500;",
+    "  display: flex; align-items: center; gap: 4px;",
+    "}",
+    ".bini-route-value {",
+    "  color: #60a5fa;",
+    "  max-width: 120px;",
+    "  overflow: hidden;",
+    "  text-overflow: ellipsis;",
+    "  white-space: nowrap;",
+    "}"
+  ].join("\\n");
+
+  var biniPath = "${BINI_PATH}";
+  
+  var menu = document.createElement("div");
+  menu.id = "bini-menu";
+  menu.setAttribute("role", "menu");
+  menu.innerHTML = '<div class="bini-menu-item"><span class="bini-menu-label">Route</span><span class="bini-menu-value" id="bini-route-type">Static</span></div><div class="bini-menu-item"><span class="bini-menu-label">Bundler</span><span class="bini-menu-value">Rolldown</span></div><div class="bini-menu-item bini-menu-item-clickable" id="bini-route-info"><span class="bini-menu-label">Route Info</span><span class="bini-menu-value"><span id="bini-route-name" class="bini-route-value">/</span>${CHEVRON_RIGHT}</span></div>';
+  
+  var w = document.createElement("div");
+  w.id = "w";
+  w.className = "loading";
+  w.innerHTML =
+    '<svg class="bf" width="20" height="28" viewBox="0 0 22 31" fill="none">' +
+    '<defs><linearGradient id="fg" x1="9.96" y1="-12.92" x2="9.96" y2="40.08" gradientUnits="userSpaceOnUse">' +
+    '<stop stop-color="#00CFFF"/><stop offset="1" stop-color="#0077FF"/>' +
+    '</linearGradient></defs>' +
+    '<path fill="url(#fg)" d="' + biniPath + '"/></svg>' +
+    '<svg class="bs" width="20" height="28" viewBox="0 0 22 31" fill="none">' +
+    '<defs><linearGradient id="sg" x1="9.96" y1="-12.92" x2="9.96" y2="40.08" gradientUnits="userSpaceOnUse">' +
+    '<stop stop-color="#00CFFF"/><stop offset="1" stop-color="#0077FF"/>' +
+    '</linearGradient></defs>' +
+    '<path class="bsp" d="' + biniPath + '"/></svg>' +
+    '<div class="ep">' +
+    '<span class="ep-icon">' +
+    '<svg width="20" height="28" viewBox="0 0 22 31" fill="none">' +
+    '<path fill="#fff" d="' + biniPath + '"/>' +
+    '</svg>' +
+    '</span>' +
+    '<div class="ep-content">' +
+    '<span class="ep-count" id="bini-err-count">0</span>' +
+    '<span class="ep-label" id="bini-err-label">Issues</span>' +
+    '</div>' +
+    '</div>';
+
+  sr.appendChild(style);
+  sr.appendChild(menu);
+  sr.appendChild(w);
+
+  var el = sr.getElementById("w");
+  var sp = el.querySelector(".bsp");
+  var countEl = sr.getElementById("bini-err-count");
+  var labelEl = sr.getElementById("bini-err-label");
+  var animDone = false, ready = false, timer = null;
+  var menuEl = sr.getElementById("bini-menu");
+  var menuVisible = false;
+
+  window.__bini_set_error_count = function(count) {
+    if (countEl) countEl.textContent = count;
+    if (labelEl) labelEl.textContent = count === 1 ? "Issue" : "Issues";
+    if (count > 0) {
+      el.classList.add("has-errors");
+      el.classList.remove("loading");
+    } else {
+      el.classList.remove("has-errors");
+    }
+  };
+  
+  window.__bini_set_error_count(0);
+
+  function idle() { 
+    clearTimeout(timer); 
+    timer = null; 
+    if (!el.classList.contains("has-errors")) {
+      el.classList.remove("loading");
+    }
+  }
+  
+  function loop() {
+    if (ready) return;
+    animDone = false;
+    sp.style.animation = "none";
+    sp.offsetHeight;
+    sp.style.strokeDashoffset = "300";
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        sp.style.animation = "";
+        if (!el.classList.contains("has-errors")) el.classList.add("loading");
+      });
+    });
+    timer = setTimeout(function () { if (!ready) loop(); }, 2000);
+  }
+  
+  function start() {
+    animDone = false; 
+    ready = false;
+    loop();
+    timer = setTimeout(function () { 
+      ready = true; 
+      if (animDone) idle(); 
+    }, 1800);
+  }
+  
+  sp.addEventListener("animationend", function (e) {
+    if (e.animationName !== "draw") return;
+    animDone = true;
+    clearTimeout(timer); 
+    timer = null;
+    if (ready) idle(); 
+    else loop();
+  });
+  
+  function onReady() { 
+    ready = true; 
+    clearTimeout(timer); 
+    timer = null; 
+    if (animDone) idle(); 
+  }
+  
+  if (document.readyState === "complete") { onReady(); }
+  else { window.addEventListener("load", onReady, { once: true }); }
+
+  function toggleMenu(e) {
+    e.stopPropagation();
+    menuVisible = !menuVisible;
+    if (menuVisible) {
+      menuEl.classList.add("show");
+    } else {
+      menuEl.classList.remove("show");
+    }
+  }
+  
+  document.addEventListener("click", function(e) {
+    var clickedInShadow = e.composedPath().includes(menuEl) || e.composedPath().includes(el);
+    if (!clickedInShadow && menuVisible) {
+      menuEl.classList.remove("show");
+      menuVisible = false;
+    }
+  });
+
+  el.addEventListener("click", function(e) {
+    e.stopPropagation();
+    if (el.classList.contains("has-errors")) {
+      if (window.__bini_show_overlay) {
+        window.__bini_show_overlay();
+      }
+    } else {
+      toggleMenu(e);
+    }
+  });
+  
+  var routeInfoBtn = sr.getElementById("bini-route-info");
+  if (routeInfoBtn) {
+    routeInfoBtn.addEventListener("click", function(e) {
+      e.stopPropagation();
+      menuEl.classList.remove("show");
+      menuVisible = false;
+      console.log("[Bini] Route Info:", window.location.pathname);
+    });
+  }
+  
+  function updateMenuInfo() {
+    var routeTypeEl = sr.getElementById("bini-route-type");
+    var routeNameEl = sr.getElementById("bini-route-name");
+    
+    if (routeNameEl) {
+      routeNameEl.textContent = window.location.pathname || '/';
+    }
+    
+    var currentPath = window.location.pathname || '/';
+    
+    fetch('/__bini_route_match?path=' + encodeURIComponent(currentPath))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (routeTypeEl) {
+          if (data.type === 'dynamic') {
+            routeTypeEl.textContent = 'Dynamic';
+            routeTypeEl.style.color = '#fbbf24';
+          } else if (data.type === 'static') {
+            routeTypeEl.textContent = 'Static';
+            routeTypeEl.style.color = '#10b981';
+          } else {
+            routeTypeEl.textContent = 'Not Found';
+            routeTypeEl.style.color = '#ef4444';
+          }
+        }
+      })
+      .catch(function() {
+        if (routeTypeEl) {
+          routeTypeEl.textContent = 'Static';
+          routeTypeEl.style.color = '#10b981';
+        }
+      });
+  }
+  
+  updateMenuInfo();
+
+  if (import.meta.hot) {
+    import.meta.hot.on("vite:beforeUpdate", start);
+    import.meta.hot.on("vite:afterUpdate", function () { 
+      ready = true; 
+      if (animDone) idle();
+      updateMenuInfo();
+    });
+  }
+})();
+`;
 
         const tag = '<script type="module">' + js + '<\/script>';
         return html.replace('</body>', tag + '</body>');
@@ -271,10 +418,9 @@ function biniLoadingPlugin(): Plugin {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PLUGIN 2 — Error overlay with Shiki syntax highlighting
+// PLUGIN 2 — Error overlay
 // ─────────────────────────────────────────────────────────────
-function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
-  let highlighter: Highlighter | null = null;
+function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   const shikiTheme = options.shikiTheme || 'dark-plus';
 
   const theme = {
@@ -289,26 +435,20 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
     info: '#3b82f6',
     success: '#10b981',
     chipBg: 'rgba(255,255,255,0.05)',
-    elevation1: '0 4px 20px rgba(0,0,0,0.5)',
-    elevation2: '0 8px 30px rgba(0,0,0,0.6)',
     maxWidth: '900px',
   };
 
   return {
     name: 'bini-overlay:error',
     apply: 'serve',
-    
-    async buildStart() {
-      // Lazy-loaded on first error
-    },
 
     transformIndexHtml: {
       order: 'pre',
       async handler(html: string, ctx: IndexHtmlTransformContext): Promise<HtmlTagDescriptor[] | string> {
         if (!isDev(ctx)) return html;
-        // in the loading badge pill (bottom-left) via window.__bini_set_error_count()
+
         const overlayHtml = `
-<div id="__bini_root" style="position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;padding-top:10vh;padding-left:15px;padding-right:15px;background:${theme.bg};backdrop-filter:blur(12px);font-family:system-ui,-apple-system,monospace;display:none;">
+<div id="__bini_root" style="position:fixed;inset:0;z-index:2147483646;display:flex;flex-direction:column;align-items:center;padding-top:10vh;padding-left:15px;padding-right:15px;background:${theme.bg};backdrop-filter:blur(12px);font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;display:none;">
   <div id="__bini_backdrop" style="position:fixed;inset:0;z-index:-1;background:${theme.bg};"></div>
   <div style="position:relative;z-index:2;display:flex;width:100%;max-width:${theme.maxWidth};align-items:flex-end;justify-content:space-between;">
     <div style="display:flex;gap:8px;background:${theme.surface};padding:12px;border-radius:16px 16px 0 0;border:1px solid ${theme.border};border-bottom:none;">
@@ -324,18 +464,18 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
       <span style="font-size:14px;font-weight:500;background:linear-gradient(135deg,#00CFFF,#0077FF);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Bini.js</span>
     </div>
   </div>
-  <div style="position:relative;z-index:10;display:flex;width:100%;max-width:${theme.maxWidth};flex-direction:column;overflow:hidden;border-radius:0 0 16px 16px;background:${theme.surface};backdrop-filter:blur(10px);color:${theme.text};box-shadow:${theme.elevation2};border:1px solid ${theme.border};border-top:none;">
+  <div style="position:relative;z-index:10;display:flex;width:100%;max-width:${theme.maxWidth};flex-direction:column;overflow:hidden;border-radius:0 0 16px 16px;background:${theme.surface};backdrop-filter:blur(10px);color:${theme.text};box-shadow:0 8px 30px rgba(0,0,0,0.6);border:1px solid ${theme.border};border-top:none;">
     <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid ${theme.border};background:${theme.surface};padding:12px 20px;">
       <div style="display:flex;align-items:center;gap:12px;flex:1;">
-        <span id="__bini_heading" style="color:${theme.accent};font-family:monospace;font-size:12px;background:rgba(248,113,113,0.12);padding:4px 12px;border-radius:20px;border:1px solid rgba(248,113,113,0.25);white-space:nowrap;"></span>
-        <button id="__bini_filelink" style="font-size:11px;font-family:monospace;color:${theme.info};background:rgba(59,130,246,0.1);padding:4px 8px;border-radius:6px;cursor:pointer;display:none;border:none;"></button>
+        <span id="__bini_heading" style="color:${theme.accent};font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;font-size:12px;background:rgba(248,113,113,0.12);padding:4px 12px;border-radius:20px;border:1px solid rgba(248,113,113,0.25);white-space:nowrap;"></span>
+        <span id="__bini_file_info" style="font-size:11px;font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;color:${theme.info};background:rgba(59,130,246,0.1);padding:4px 8px;border-radius:6px;"></span>
       </div>
       <div style="display:flex;gap:8px;">
         <button id="__bini_copy" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:${theme.chipBg};border:1px solid ${theme.border};border-radius:8px;cursor:pointer;color:${theme.text};transition:all 0.2s;">${COPY_ICON}</button>
         <button id="__bini_close" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:${theme.chipBg};border:1px solid ${theme.border};border-radius:8px;cursor:pointer;color:${theme.text};transition:all 0.2s;">${CLOSE_ICON}</button>
       </div>
     </div>
-    <div id="__bini_error_content" style="padding:24px;"></div>
+    <div id="__bini_error_content" style="padding:24px;max-height:60vh;overflow-y:auto;font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;"></div>
   </div>
 </div>`;
 
@@ -353,6 +493,12 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
   var _errorHandler = null;
   var _rejectionHandler = null;
   var _keydownHandler = null;
+  
+  function shortenPath(filePath) {
+    if (!filePath) return '';
+    var match = filePath.match(/(?:src|app)[\\/\\\\].*$/);
+    return match ? match[0] : filePath.split(/[\\/\\\\]/).slice(-2).join('/');
+  }
   
   function stripNonAscii(str) {
     return str.replace(/[^\\x20-\\x7E]/g, '').trim();
@@ -373,74 +519,11 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
             file.includes('/@vite/') || file.includes('/@vitejs/') ||
             file.includes('/vite/dist/') || file.includes('react-dom') ||
             file.includes('chunk-') || file.includes('?v=')) continue;
-        var shortFile = file.replace(/^.*?(src[\\/]|app[\\/])/, '$1');
-        if (shortFile === file) shortFile = file.split('/').slice(-2).join('/');
+        var shortFile = shortenPath(file);
         frames.push({ fn: fnName, file: shortFile, line: ln });
       }
     }
     return frames.slice(0, 6);
-  }
-
-  var _stackIdCounter = 0;
-
-  document.addEventListener('click', function(e) {
-    var btn = e.target.closest('[data-bini-stack-toggle]');
-    if (!btn) return;
-    var listId = btn.getAttribute('data-bini-stack-toggle');
-    var chevronId = btn.getAttribute('data-bini-stack-chevron');
-    var list = document.getElementById(listId);
-    var chevron = document.getElementById(chevronId);
-    if (!list || !chevron) return;
-    var open = list.style.display !== 'none';
-    list.style.display = open ? 'none' : 'block';
-    chevron.style.transform = open ? 'rotate(-90deg)' : 'rotate(0deg)';
-  });
-
-  function renderCallStack(stack) {
-    var frames = parseStack(stack);
-    if (!frames.length) return "";
-    var uid = "bcs" + (++_stackIdCounter);
-    var listId = uid + "_list";
-    var chevronId = uid + "_chev";
-
-    var html = "<div style='margin-top:20px;border-top:1px solid rgba(255,255,255,0.06);padding-top:4px;'>";
-
-    html += "<button"
-          + " data-bini-stack-toggle='" + listId + "'"
-          + " data-bini-stack-chevron='" + chevronId + "'"
-          + " style='display:flex;align-items:center;gap:8px;width:100%;background:none;"
-          + "border:none;cursor:pointer;padding:10px 0;text-align:left;'>";
-
-    html += "<span id='" + chevronId + "' style='display:inline-flex;align-items:center;color:#6b7280;transition:transform 0.2s;transform:rotate(0deg);'>"
-          + "<svg width='12' height='12' viewBox='0 0 16 16' fill='none'>"
-          + "<path fill-rule='evenodd' clip-rule='evenodd' d='M3.47 5.47a.75.75 0 0 1 1.06 0L8 8.94l3.47-3.47a.75.75 0 1 1 1.06 1.06l-4 4a.75.75 0 0 1-1.06 0l-4-4a.75.75 0 0 1 0-1.06z' fill='currentColor'/>"
-          + "</svg></span>";
-
-    html += "<span style='font-size:11px;font-weight:600;color:#9ca3af;letter-spacing:0.06em;text-transform:uppercase;'>Call Stack</span>";
-    html += "<span style='font-size:10px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:1px 7px;color:#6b7280;'>" + frames.length + "</span>";
-    html += "</button>";
-
-    html += "<div id='" + listId + "' style='display:block;'>";
-    for (var i = 0; i < frames.length; i++) {
-      var f = frames[i];
-      var isFirst = i === 0;
-      html += "<div style='display:flex;flex-direction:column;padding:7px 0 7px 20px;"
-            + "border-bottom:1px solid rgba(255,255,255,0.04);"
-            + (isFirst ? "border-top:1px solid rgba(255,255,255,0.04);" : "")
-            + "'>";
-      html += "<span style='font-size:12px;font-weight:500;color:" + (isFirst ? "#e4e4e7" : "#9ca3af") + ";font-family:monospace;'>"
-            + escapeHtml(f.fn || "(anonymous)") + "</span>";
-      html += "<span style='font-size:11px;color:#4b5563;font-family:monospace;margin-top:2px;'>"
-            + escapeHtml(f.file) + " (" + escapeHtml(f.line) + ")</span>";
-      html += "</div>";
-    }
-    html += "</div>";
-    html += "</div>";
-    return html;
-  }
-
-  function hasAnsi(str) {
-    return /\\x1b\\[|\\u001b\\[/.test(str);
   }
 
   function langFromFile(filePath) {
@@ -475,27 +558,17 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
   function loadShiki() {
     if (shikiLoadPromise) return shikiLoadPromise;
     shikiLoadPromise = new Promise(function(resolve) {
-      if (window.shiki && window.shiki.createHighlighter) {
-        window.shiki.createHighlighter({
-          themes: ["${shikiTheme}"],
-          langs: ["javascript", "typescript", "jsx", "tsx", "json", "html", "css"]
-        }).then(function(h) {
-          shikiHighlighter = h;
-          resolve(h);
-        }).catch(function() { resolve(null); });
+      if (window.shiki && window.shiki.codeToHtml) {
+        shikiHighlighter = window.shiki;
+        resolve(window.shiki);
         return;
       }
       var shikiScript = document.createElement("script");
-      shikiScript.src = "https://unpkg.com/shiki@4.0.2/dist/index.js";
+      shikiScript.src = "https://cdn.jsdelivr.net/npm/shiki@1.0.0/dist/index.min.js";
       shikiScript.onload = function() {
-        if (window.shiki && window.shiki.createHighlighter) {
-          window.shiki.createHighlighter({
-            themes: ["${shikiTheme}"],
-            langs: ["javascript", "typescript", "jsx", "tsx", "json", "html", "css"]
-          }).then(function(h) {
-            shikiHighlighter = h;
-            resolve(h);
-          }).catch(function() { resolve(null); });
+        if (window.shiki) {
+          shikiHighlighter = window.shiki;
+          resolve(window.shiki);
         } else {
           resolve(null);
         }
@@ -507,90 +580,95 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
   }
   
   function highlightCode(code, lang) {
-    if (shikiHighlighter) {
+    if (shikiHighlighter && shikiHighlighter.codeToHtml) {
       try {
         return shikiHighlighter.codeToHtml(code, { lang: lang || "javascript", theme: "${shikiTheme}" });
       } catch(e) {
-        return "<pre style='margin:0;'><code>" + escapeHtml(code) + "</code></pre>";
+        return "<pre style='margin:0;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;'><code>" + escapeHtml(code) + "</code></pre>";
       }
     }
-    return "<pre style='margin:0;'><code>" + escapeHtml(code) + "</code></pre>";
+    return "<pre style='margin:0;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;'><code>" + escapeHtml(code) + "</code></pre>";
   }
   
-  function getErrorColor(errorType) {
-    if (errorType.includes('PARSE') || errorType.includes('Syntax')) return '#f87171';
-    if (errorType.includes('TYPE')) return '#fbbf24';
-    if (errorType.includes('REF')) return '#60a5fa';
-    if (errorType.includes('RUNTIME')) return '#f97316';
-    if (errorType.includes('BUILD')) return '#a855f7';
-    return '#f87171';
-  }
-  
-  function formatErrorMessage(message, codeLines, fileLang, stack) {
+  function formatErrorMessage(message, codeLines, fileLang, stack, err) {
     var lang = fileLang || "javascript";
     var lines = message.split("\\n");
-    var html = "<div style='font-family:monospace;font-size:13px;line-height:1.6;'>";
+    var html = "<div style='font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.6;'>";
+    
+    if (err && err.plugin) {
+      html += "<div style='display:flex;align-items:center;gap:8px;margin-bottom:16px;'>";
+      html += "<span style='color:#6b7280;font-size:11px;'>" + escapeHtml(err.plugin) + "</span>";
+      html += "</div>";
+    }
     
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
       
       if (line.includes('NextJs') || line.includes('Turbopack')) continue;
-      if (line.match(/^\\s*[│|]/)) continue;
       if (line.includes('╭─[') || line.includes('────╯')) continue;
-      if (line.match(/^\\s*\\d+\\s*[│|]/)) continue;
 
-      var errorMatch = line.match(/^\\[([^\\]]+)\\]\\s*Error:\\s*(.*)$/);
+      var errorMatch = line.match(/^\\[([^\\]]+)\\]\\s*(.+)$/);
       if (errorMatch) {
-        var errorColor = getErrorColor(errorMatch[1]);
         var cleanMsg = stripNonAscii(errorMatch[2]);
-        html += "<div style='background:rgba(248,113,113,0.08);padding:12px 16px;margin:8px 0;border-radius:8px;'>";
-        html += "<span style='color:" + errorColor + ";font-weight:600;'>[" + escapeHtml(errorMatch[1]) + "] Error:</span> ";
-        html += "<span style='color:${theme.text};'>" + escapeHtml(cleanMsg) + "</span>";
-        html += "</div>";
-        continue;
-      }
-      
-      var helpMatch = line.match(/^\\s*(?:│\\s*)?Help:\\s*(.*)$/);
-      if (helpMatch) {
-        html += "<div style='background:rgba(59,130,246,0.08);padding:10px 16px;margin:12px 0;border-radius:8px;'>";
-        html += "<span style='color:#3b82f6;font-weight:600;'>Help:</span> ";
-        html += "<span style='color:#9ca3af;'>" + escapeHtml(helpMatch[1]) + "</span>";
+        html += "<div style='background:rgba(248,113,113,0.08);padding:16px;border-radius:8px;margin:8px 0;'>";
+        html += "<div style='color:#f87171;font-weight:600;margin-bottom:8px;'>" + escapeHtml(errorMatch[1]) + "</div>";
+        html += "<div style='color:#e4e4e7;font-size:14px;'>" + escapeHtml(cleanMsg) + "</div>";
         html += "</div>";
         continue;
       }
       
       if (line.match(/Transform failed/)) {
-        html += "<div style='color:#f97316;font-weight:500;padding:8px 0;border-bottom:1px solid ${theme.border};margin-bottom:12px;'>" + escapeHtml(line) + "</div>";
+        html += "<div style='color:#f97316;font-weight:500;padding:8px 0;'>" + escapeHtml(line) + "</div>";
         continue;
       }
       
-      if (line.trim() && !line.match(/^\\s*$/)) {
+      if (line.trim() && !line.match(/^\\s*[│|]/) && !line.match(/^\\s*\\d+\\s*[│|]/)) {
         html += "<div style='color:#9ca3af;padding:2px 0;'>" + escapeHtml(stripNonAscii(line)) + "</div>";
       }
     }
     
     if (codeLines && codeLines.length > 0) {
       html += "<div style='margin:16px 0;border:1px solid ${theme.border};border-radius:12px;overflow:hidden;background:${theme.surfaceMuted};'>";
-      html += "<div style='background:${theme.surface};padding:8px 16px;border-bottom:1px solid ${theme.border};font-size:11px;color:#9ca3af;font-weight:500;'>";
+      html += "<div style='background:${theme.surface};padding:8px 16px;border-bottom:1px solid ${theme.border};font-size:11px;color:#9ca3af;font-weight:500;display:flex;align-items:center;justify-content:space-between;'>";
       html += "<span style='background:rgba(255,255,255,0.05);padding:2px 8px;border-radius:4px;'>" + lang.toUpperCase() + "</span>";
+      if (err && err.file && err.line) {
+        html += "<span style='color:#6b7280;'>" + escapeHtml(shortenPath(err.file)) + ":" + err.line + "</span>";
+      }
       html += "</div><div style='padding:12px 0;'>";
       for (var k = 0; k < codeLines.length; k++) {
         var cl = codeLines[k];
         var isErr = cl.includes('>>>');
-        var clBg = isErr ? "background:rgba(239,68,68,0.08);border-left:3px solid #f87171;" : "";
+        var clBg = isErr ? "background:rgba(239,68,68,0.08);" : "";
         var clNumMatch = cl.match(/(\\d+):/);
         var clNum = clNumMatch ? clNumMatch[1] : "";
         var clCode = clNumMatch ? cl.substring(cl.indexOf(':') + 1).trim() : cl;
         clCode = clCode.replace(/^>>>\\s*/, "");
-        html += "<div style='display:flex;padding:4px 0;" + clBg + "'>";
-        html += "<span style='min-width:55px;padding:0 12px;text-align:right;color:#6b7280;user-select:none;font-size:11px;font-weight:500;'>" + clNum + "</span>";
-        html += "<div style='flex:1;padding:0 12px;color:${theme.text};white-space:pre;overflow-x:auto;'>" + highlightCode(clCode, lang) + "</div>";
+        html += "<div style='display:flex;padding:2px 0;" + clBg + "'>";
+        html += "<span style='min-width:55px;padding:0 12px;text-align:right;color:" + (isErr ? "#f87171" : "#6b7280") + ";user-select:none;font-size:11px;font-weight:500;'>" + clNum + "</span>";
+        html += "<div style='flex:1;padding:0 12px;white-space:pre;overflow-x:auto;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.5;'>" + highlightCode(clCode, lang) + "</div>";
         html += "</div>";
       }
       html += "</div></div>";
     }
 
-    html += renderCallStack(stack);
+    var frames = parseStack(stack);
+    if (frames.length > 0) {
+      html += "<div style='margin-top:20px;'>";
+      html += "<div style='font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;'>Call Stack</div>";
+      html += "<div style='background:#0a0a0a;border:1px solid rgba(255,255,255,0.08);border-radius:8px;overflow:hidden;'>";
+      for (var j = 0; j < frames.length; j++) {
+        var f = frames[j];
+        html += "<div style='padding:8px 16px;border-bottom:1px solid rgba(255,255,255,0.04);font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:12px;'>";
+        html += "<span style='color:#6b7280;'>▶</span> ";
+        html += "<span style='color:#60a5fa;'>" + escapeHtml(f.fn || '<anonymous>') + "</span>";
+        html += "<span style='color:#6b7280;'> @ </span>";
+        html += "<span style='color:#10b981;'>" + escapeHtml(f.file) + "</span>";
+        html += "<span style='color:#6b7280;'>:</span><span style='color:#fbbf24;'>" + f.line + "</span>";
+        html += "</div>";
+      }
+      html += "</div></div>";
+    }
+    
     html += "</div>";
     return html;
   }
@@ -626,8 +704,14 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
     });
     
     document.getElementById("__bini_close").addEventListener("click", hide);
-    document.getElementById("__bini_prev").addEventListener("click", function() { currentIndex = Math.max(0, currentIndex - 1); render(); });
-    document.getElementById("__bini_next").addEventListener("click", function() { currentIndex = Math.min(errors.length - 1, currentIndex + 1); render(); });
+    document.getElementById("__bini_prev").addEventListener("click", function() { 
+      currentIndex = Math.max(0, currentIndex - 1); 
+      render(); 
+    });
+    document.getElementById("__bini_next").addEventListener("click", function() { 
+      currentIndex = Math.min(errors.length - 1, currentIndex + 1); 
+      render(); 
+    });
 
     _keydownHandler = function(e) { if (e.key === "Escape") hide(); };
     document.addEventListener("keydown", _keydownHandler);
@@ -657,42 +741,30 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
       var msg = cleanMessage || "";
       if (err.name === "Unhandled Rejection") {
         errorType = "Unhandled Rejection";
-      } else if (msg.match(/Element type is invalid|Cannot read prop|is not a function|is not defined|Cannot find module/i)) {
-        errorType = "Runtime Error";
-      } else if (msg.match(/SyntaxError|PARSE_ERROR|Unexpected token|Expected.*but found/i)) {
+      } else if (msg.match(/SyntaxError|PARSE_ERROR|Unexpected token|Expected/i)) {
         errorType = "Parse Error";
       } else if (msg.match(/Transform failed|Build failed/i)) {
         errorType = "Build Error";
       } else if (msg.match(/TypeError/i) || (err.name === "TypeError")) {
         errorType = "Type Error";
+      } else if (msg.match(/Element type is invalid|Cannot read|is not a function|is not defined/i)) {
+        errorType = "Runtime Error";
       } else if (err.name && err.name !== "Plugin Error" && err.name !== "Vite Error") {
         errorType = err.name;
-      } else if (err.id) {
-        errorType = "Build Error";
       } else {
-        errorType = "Runtime Error";
+        errorType = "Build Error";
       }
       headingEl.textContent = errorType;
     }
     
-    var filelinkEl = document.getElementById("__bini_filelink");
-    var locationMatch = cleanMessage.match(/(?:src|app)[\\/\\\\][^\\n]+?\\.(?:tsx?|jsx?):(\\d+):(\\d+)/);
-    if (locationMatch) {
-      var fullMatch = cleanMessage.match(/(?:src|app)[\\/\\\\][^\\n]+?\\.(?:tsx?|jsx?)/);
-      if (fullMatch) {
-        filelinkEl.textContent = fullMatch[0] + ":" + locationMatch[1];
-        filelinkEl.style.display = "flex";
-        filelinkEl.onclick = function() {
-          fetch("/__open-in-editor?file=" + encodeURIComponent(fullMatch[0] + ":" + locationMatch[1] + ":" + locationMatch[2]));
-        };
-      }
-    } else {
-      filelinkEl.style.display = "none";
+    var fileInfoEl = document.getElementById("__bini_file_info");
+    if (fileInfoEl && err.file) {
+      fileInfoEl.textContent = shortenPath(err.file) + (err.line ? ":" + err.line : "");
     }
     
     var contentEl = document.getElementById("__bini_error_content");
     if (contentEl) {
-      contentEl.innerHTML = formatErrorMessage(cleanMessage, err.codeLines || [], err.fileLang || "javascript", err.stack || "");
+      contentEl.innerHTML = formatErrorMessage(cleanMessage, err.codeLines || [], err.fileLang || "javascript", err.stack || "", err);
     }
     
     document.getElementById("__bini_current").textContent = currentIndex + 1;
@@ -709,9 +781,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
       text += "\\n\\nFile: " + err.file;
       if (err.line) text += ":" + err.line;
     }
-    if (err.codeLines && err.codeLines.length > 0) {
-      text += "\\n\\nCode Context:\\n" + err.codeLines.join("\\n");
-    }
+    if (err.plugin) text += "\\nPlugin: " + err.plugin;
     text += "\\n\\n" + (err.stack || "");
     navigator.clipboard.writeText(text).catch(function() {});
   }
@@ -724,7 +794,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
   }
 
   function addError(err) {
-    if (hasAnsi(err.message || "")) return;
     err.originalMessage = err.message;
 
     var key = getErrorKey(err);
@@ -873,6 +942,8 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
       cleanup();
     });
   }
+  
+  loadShiki();
 })();
 `.trim();
 
@@ -883,9 +954,9 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): Plugin {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PLUGIN 3 — Intercept vite-error-overlay custom element
+// PLUGIN 3 — Intercept vite-error-overlay
 // ─────────────────────────────────────────────────────────────
-function biniViteErrorInterceptPlugin(): Plugin {
+function biniViteErrorInterceptPlugin(): BiniPlugin {
   return {
     name: 'bini-overlay:vite-intercept',
     apply: 'serve',
@@ -894,18 +965,18 @@ function biniViteErrorInterceptPlugin(): Plugin {
       handler(html: string, ctx: IndexHtmlTransformContext): HtmlTagDescriptor[] | string {
         if (!isDev(ctx)) return html;
 
-        const js = [
-          '(function () {',
-          '  if (customElements.get("vite-error-overlay")) return;',
-          '  class BiniViteErrorOverlay extends HTMLElement {',
-          '    constructor() {',
-          '      super();',
-          '      this.style.display = "none";',
-          '    }',
-          '  }',
-          '  customElements.define("vite-error-overlay", BiniViteErrorOverlay);',
-          '})();',
-        ].join('\n');
+        const js = `
+(function () {
+  if (customElements.get("vite-error-overlay")) return;
+  class BiniViteErrorOverlay extends HTMLElement {
+    constructor() {
+      super();
+      this.style.display = "none";
+    }
+  }
+  customElements.define("vite-error-overlay", BiniViteErrorOverlay);
+})();
+`.trim();
 
         return [scriptTag(js, 'head-prepend', true)];
       },
@@ -914,15 +985,15 @@ function biniViteErrorInterceptPlugin(): Plugin {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PLUGIN 4 — Server-side error interceptor with code context API
+// PLUGIN 4 — Code context API
 // ─────────────────────────────────────────────────────────────
-function biniServerErrorPlugin(): Plugin {
+function biniCodeContextPlugin(): BiniPlugin {
   return {
-    name: 'bini-overlay:server-error',
+    name: 'bini-overlay:code-context',
     apply: 'serve',
 
-    configureServer(server) {
-      server.middlewares.use('/__bini_code_context', async (req, res, next) => {
+    configureServer(server: ViteDevServer) {
+      server.middlewares.use('/__bini_code_context', async (req: IncomingMessage, res: ServerResponse) => {
         try {
           const url = new URL(req.url || '', `http://${req.headers.host}`);
           const filePath = url.searchParams.get('file');
@@ -955,99 +1026,191 @@ function biniServerErrorPlugin(): Plugin {
           const contextLines: string[] = [];
           for (let i = startLine; i < endLine; i++) {
             const prefix = i + 1 === line ? '>>> ' : '    ';
-            contextLines.push(`${prefix}${i + 1}: ${lines[i]}`);
+            contextLines.push(prefix + (i + 1) + ': ' + lines[i]);
           }
           
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({ lines: contextLines }));
-        } catch (err) {
+        } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: 'Failed to read file' }));
         }
-      });
-      
-      function broadcastViteError(ws: any, e: any, urlHint: string = ''): void {
-        const message: string = e?.message ?? String(e);
-        const stack: string = e?.stack ?? '';
-        const rawFile: string = e?.id ?? e?.file ?? e?.filename ?? urlHint.split('?')[0];
-        const file = rawFile.replace(/^\//, '');
-        
-        if (/\x1b\[|\u001b\[/.test(message)) return;
-
-        let lineNumber: number | null = null;
-        let columnNumber: number | null = null;
-        if (e?.loc?.line) {
-          lineNumber = e.loc.line;
-          columnNumber = e.loc.column ?? null;
-        } else {
-          const lineMatch = message.match(/:(\d+):(\d+)/);
-          if (lineMatch) {
-            lineNumber = parseInt(lineMatch[1], 10);
-            columnNumber = parseInt(lineMatch[2], 10);
-          }
-        }
-
-        try {
-          ws.send({
-            type: 'error',
-            err: {
-              message,
-              stack,
-              id: file,
-              loc: {
-                file: e?.loc?.file || file,
-                line: lineNumber,
-                column: columnNumber,
-              },
-              plugin: e?.plugin || 'bini-overlay',
-            },
-          });
-        } catch (err) {}
-      }
-
-      function patchEnvironment(env: any): void {
-        if (!env?.transformRequest || env.__biniPatched) return;
-        env.__biniPatched = true;
-        const orig = env.transformRequest.bind(env);
-        env.transformRequest = async function (url: string, options?: any) {
-          try {
-            return await orig(url, options);
-          } catch (e: any) {
-            broadcastViteError(server.ws, e, url);
-            throw e;
-          }
-        };
-      }
-
-      function patchAllEnvironments(): void {
-        const envs = (server as any).environments ?? {};
-        for (const env of Object.values(envs)) {
-          patchEnvironment(env);
-        }
-        patchEnvironment(server);
-      }
-
-      patchAllEnvironments();
-      server.httpServer?.once('listening', patchAllEnvironments);
-
-      server.middlewares.use((err: any, _req: any, _res: any, next: any) => {
-        if (err) {
-          try {
-            broadcastViteError(server.ws, err);
-          } catch { /* ignore */ }
-        }
-        next(err);
       });
     },
   };
 }
 
 // ─────────────────────────────────────────────────────────────
-// Public API
+// PLUGIN 5 — Routes API for Bini Router
+// ─────────────────────────────────────────────────────────────
+function biniRoutesPlugin(): BiniPlugin {
+  return {
+    name: 'bini-overlay:routes',
+    apply: 'serve',
+
+    configureServer(server: ViteDevServer) {
+      // Helper to scan routes - BINI ROUTER SPECIFIC
+      async function scanRoutes(): Promise<RouteInfo[]> {
+        const routes: RouteInfo[] = [];
+        const appDir = path.join(process.cwd(), 'src', 'app');
+        
+        function hasDynamicSegments(routePath: string): boolean {
+          return routePath.split('/').some(seg => 
+            (seg.startsWith('[') && seg.endsWith(']'))
+          );
+        }
+        
+        function createPattern(routePath: string): string {
+          return routePath
+            .replace(/\[\.\.\.(.+)\]/g, '.*')      // [...slug] catch-all
+            .replace(/\[(.+)\]/g, '([^/]+)');       // [id] dynamic segment
+        }
+        
+        async function scanDir(dir: string, basePath: string = '') {
+          if (!fs.existsSync(dir)) return;
+          
+          const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+          
+          // First, scan for flat page files in current directory (bini-router style)
+          for (const entry of entries) {
+            if (entry.isFile()) {
+              const isPageFile = /^(.+)\.(tsx?|jsx?)$/.test(entry.name) &&
+                !entry.name.startsWith('_') &&
+                !entry.name.startsWith('layout') &&
+                !entry.name.startsWith('loading') &&
+                !entry.name.startsWith('not-found') &&
+                !entry.name.startsWith('page') &&
+                !entry.name.startsWith('route');
+              
+              if (isPageFile && basePath === '') {
+                // Flat file in app root: about.tsx → /about
+                const routeName = entry.name.replace(/\.(tsx?|jsx?)$/, '');
+                let routePath = '/' + routeName;
+                routePath = routePath.replace(/\\/g, '/');
+                
+                const type = hasDynamicSegments(routePath) ? 'dynamic' : 'static';
+                const pattern = type === 'dynamic' ? createPattern(routePath) : undefined;
+                
+                routes.push({
+                  method: 'GET',
+                  path: routePath,
+                  file: entry.name,
+                  type,
+                  ...(pattern && { pattern })
+                });
+              }
+            }
+          }
+          
+          // Then scan subdirectories
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            
+            if (entry.isDirectory()) {
+              // Skip private folders and API routes
+              if (!entry.name.startsWith('_') && 
+                  !entry.name.startsWith('.') && 
+                  entry.name !== 'api') {
+                await scanDir(fullPath, basePath + '/' + entry.name);
+              }
+            } else {
+              // Handle page.tsx in subdirectories
+              if (entry.name === 'page.tsx' || entry.name === 'page.ts' || 
+                  entry.name === 'page.jsx' || entry.name === 'page.js') {
+                let routePath = basePath || '/';
+                routePath = routePath.replace(/\\/g, '/');
+                if (!routePath.startsWith('/')) routePath = '/' + routePath;
+                
+                const type = hasDynamicSegments(routePath) ? 'dynamic' : 'static';
+                const pattern = type === 'dynamic' ? createPattern(routePath) : undefined;
+                
+                routes.push({
+                  method: 'GET',
+                  path: routePath,
+                  file: entry.name,
+                  type,
+                  ...(pattern && { pattern })
+                });
+              }
+            }
+          }
+        }
+        
+        await scanDir(appDir);
+        
+        // Add root route if page.tsx exists in app root
+        const hasRootRoute = routes.some(r => r.path === '/');
+        if (!hasRootRoute && fs.existsSync(path.join(appDir, 'page.tsx'))) {
+          routes.push({
+            method: 'GET',
+            path: '/',
+            file: 'page.tsx',
+            type: 'static'
+          });
+        }
+        
+        return routes;
+      }
+
+      // Endpoint to get all routes
+      server.middlewares.use('/__bini_routes', async (_req: IncomingMessage, res: ServerResponse) => {
+        try {
+          const routes = await scanRoutes();
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ routes }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ routes: [], error: String(error) }));
+        }
+      });
+
+      // Endpoint to match a specific path
+      server.middlewares.use('/__bini_route_match', async (req: IncomingMessage, res: ServerResponse) => {
+        try {
+          const url = new URL(req.url || '', `http://${req.headers.host}`);
+          const pathToMatch = url.searchParams.get('path') || '/';
+          
+          const routes = await scanRoutes();
+          
+          // First try exact match (static routes)
+          const exactMatch = routes.find(r => r.type === 'static' && r.path === pathToMatch);
+          if (exactMatch) {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ type: 'static', path: exactMatch.path }));
+            return;
+          }
+          
+          // Then try dynamic routes
+          for (const route of routes) {
+            if (route.type === 'dynamic' && route.pattern) {
+              const regex = new RegExp('^' + route.pattern + '$');
+              if (regex.test(pathToMatch)) {
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ type: 'dynamic', path: route.path }));
+                return;
+              }
+            }
+          }
+          
+          // No match - return not_found
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ type: 'not_found' }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ type: 'not_found' }));
+        }
+      });
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Public API (named export only)
 // ─────────────────────────────────────────────────────────────
 export function biniOverlay(options: BiniOverlayOptions = {}): PluginOption[] {
   return [
-    biniServerErrorPlugin(),
+    biniCodeContextPlugin(),
+    biniRoutesPlugin(),
     biniViteErrorInterceptPlugin(),
     biniErrorOverlay(options),
     biniLoadingPlugin(),
