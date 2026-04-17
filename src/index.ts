@@ -363,7 +363,6 @@ function biniLoadingPlugin(): BiniPlugin {
       routeNameEl.textContent = window.location.pathname || '/';
     }
     
-    // Use router's built-in route type detection
     if (window.__bini_get_route_type) {
       try {
         var routeType = window.__bini_get_route_type();
@@ -380,7 +379,6 @@ function biniLoadingPlugin(): BiniPlugin {
           }
         }
       } catch (e) {
-        // Fallback to static
         if (routeTypeEl) {
           routeTypeEl.textContent = 'Static';
           routeTypeEl.style.color = '#10b981';
@@ -490,7 +488,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   function shortenPath(filePath) {
     if (!filePath) return '';
     var path = filePath || '';
-    // Remove any "vite:" prefixes
     path = path.replace(/^vite:/, '');
     var match = path.match(/(?:src|app)[\\/\\\\].*$/);
     return match ? match[0] : path.split(/[\\/\\\\]/).slice(-2).join('/');
@@ -592,14 +589,19 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     var html = "<div style='font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.6;'>";
     
     if (err && err.plugin) {
+      var pluginName = err.plugin;
+      // Filter out "vite:" prefix
+      pluginName = pluginName.replace(/^vite:/, '');
       html += "<div style='display:flex;align-items:center;gap:8px;margin-bottom:16px;'>";
-      html += "<span style='color:#6b7280;font-size:11px;'>" + escapeHtml(err.plugin) + "</span>";
+      html += "<span style='color:#6b7280;font-size:11px;'>" + escapeHtml(pluginName) + "</span>";
       html += "</div>";
     }
     
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
       
+      // Filter out lines containing "vite:oxc"
+      if (line.includes('vite:oxc')) continue;
       if (line.includes('NextJs') || line.includes('Turbopack')) continue;
       if (line.includes('╭─[') || line.includes('────╯')) continue;
 
@@ -662,6 +664,15 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
         html += "<span style='color:#6b7280;'>:</span><span style='color:#fbbf24;'>" + f.line + "</span>";
         html += "</div>";
       }
+      html += "</div></div>";
+    }
+    
+    // Add component stack if available
+    if (err && err.componentStack) {
+      html += "<div style='margin-top:20px;'>";
+      html += "<div style='font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;'>Component Stack</div>";
+      html += "<div style='background:#0a0a0a;border:1px solid rgba(255,255,255,0.08);border-radius:8px;overflow:hidden;padding:12px;'>";
+      html += "<pre style='margin:0;color:#9ca3af;font-size:11px;white-space:pre-wrap;word-break:break-all;'>" + escapeHtml(err.componentStack) + "</pre>";
       html += "</div></div>";
     }
     
@@ -815,27 +826,44 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     if (_keydownHandler) { document.removeEventListener("keydown", _keydownHandler); _keydownHandler = null; }
   }
   
-  // Listen for errors from the router's error boundary
+  // Extract file from module import errors
+  function extractFileFromError(message, stack) {
+    var moduleMatch = (message || '').match(/module ['"]([^'"]+)['"]/);
+    if (moduleMatch) {
+      return { file: moduleMatch[1], line: 1 };
+    }
+    var fileMatch = (stack || '').match(/([^\\s(]+\\.(?:tsx?|jsx?|js|ts)):(\\d+):(\\d+)/);
+    if (fileMatch) {
+      return { file: fileMatch[1], line: parseInt(fileMatch[2], 10) };
+    }
+    return { file: '', line: null };
+  }
+  
   _biniErrorHandler = function(e) {
     var detail = e.detail;
     if (detail) {
+      var fileInfo = extractFileFromError(detail.message, detail.stack);
       var errorObj = {
         name: detail.name || "Runtime Error",
         message: detail.message || "Unknown error",
         stack: detail.stack || "",
         componentStack: detail.componentStack || "",
         _type: detail._type || detail.type || "runtime",
-        file: detail.file || "",
-        line: detail.line || null,
+        file: detail.file || fileInfo.file || "",
+        line: detail.line || fileInfo.line || null,
       };
       
-      // Try to extract file from stack
       var stackMatch = (detail.stack || "").match(/([^\\s(]+\\.(?:tsx?|jsx?)):(\\d+):(\\d+)/);
-      if (stackMatch) {
+      if (stackMatch && !errorObj.file) {
         errorObj.fileLang = langFromFile(stackMatch[1]);
         errorObj.file = errorObj.file || stackMatch[1];
         errorObj.line = errorObj.line || parseInt(stackMatch[2], 10);
         fetchCodeLines(stackMatch[1], parseInt(stackMatch[2], 10)).then(function(lines) {
+          errorObj.codeLines = lines;
+          addError(errorObj);
+        }).catch(function() { addError(errorObj); });
+      } else if (errorObj.file && errorObj.line) {
+        fetchCodeLines(errorObj.file, errorObj.line).then(function(lines) {
           errorObj.codeLines = lines;
           addError(errorObj);
         }).catch(function() { addError(errorObj); });
@@ -848,12 +876,13 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   
   _errorHandler = function(e) {
     e.preventDefault();
+    var fileInfo = extractFileFromError(e.message, (e.error && e.error.stack) || '');
     var errorObj = {
       name: (e.error && e.error.name) || "Runtime Error",
       message: e.message,
       stack: e.error && e.error.stack,
-      file: e.filename || "",
-      line: e.lineno || null,
+      file: e.filename || fileInfo.file || "",
+      line: e.lineno || fileInfo.line || null,
     };
     var stackMatch = (e.error && e.error.stack || "").match(/([^\\s(]+\\.(?:tsx?|jsx?)):(\\d+):(\\d+)/);
     if (stackMatch) {
@@ -861,6 +890,11 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       errorObj.file = errorObj.file || stackMatch[1];
       errorObj.line = errorObj.line || parseInt(stackMatch[2], 10);
       fetchCodeLines(stackMatch[1], parseInt(stackMatch[2], 10)).then(function(lines) {
+        errorObj.codeLines = lines;
+        addError(errorObj);
+      }).catch(function() { addError(errorObj); });
+    } else if (errorObj.file && errorObj.line) {
+      fetchCodeLines(errorObj.file, errorObj.line).then(function(lines) {
         errorObj.codeLines = lines;
         addError(errorObj);
       }).catch(function() { addError(errorObj); });
@@ -873,12 +907,13 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   _rejectionHandler = function(e) {
     e.preventDefault();
     var r = e.reason;
+    var fileInfo = extractFileFromError((r && r.message) || String(r), (r && r.stack) || '');
     var errorObj = {
       name: (r && r.name) || "Unhandled Rejection",
       message: (r && r.message) || String(r),
       stack: r && r.stack,
-      file: "",
-      line: null,
+      file: fileInfo.file || "",
+      line: fileInfo.line || null,
     };
     var stackMatch = (r && r.stack || "").match(/([^\\s(]+\\.(?:tsx?|jsx?)):(\\d+):(\\d+)/);
     if (stackMatch) {
@@ -886,6 +921,11 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       errorObj.file = stackMatch[1];
       errorObj.line = parseInt(stackMatch[2], 10);
       fetchCodeLines(stackMatch[1], parseInt(stackMatch[2], 10)).then(function(lines) {
+        errorObj.codeLines = lines;
+        addError(errorObj);
+      }).catch(function() { addError(errorObj); });
+    } else if (errorObj.file && errorObj.line) {
+      fetchCodeLines(errorObj.file, errorObj.line).then(function(lines) {
         errorObj.codeLines = lines;
         addError(errorObj);
       }).catch(function() { addError(errorObj); });
@@ -1039,7 +1079,6 @@ function biniCodeContextPlugin(): BiniPlugin {
           }
           
           const line = parseInt(lineStr, 10);
-          // Clean file path - remove any prefixes
           let cleanPath = filePath.replace(/^vite:/, '');
           const fullPath = path.isAbsolute(cleanPath) ? cleanPath : path.join(process.cwd(), cleanPath);
 
@@ -1076,7 +1115,7 @@ function biniCodeContextPlugin(): BiniPlugin {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PLUGIN 5 — Routes API for Bini Router (simplified)
+// PLUGIN 5 — Routes API for Bini Router
 // ─────────────────────────────────────────────────────────────
 function biniRoutesPlugin(): BiniPlugin {
   return {
@@ -1084,7 +1123,6 @@ function biniRoutesPlugin(): BiniPlugin {
     apply: 'serve',
 
     configureServer(server: ViteDevServer) {
-      // Simple route match endpoint - uses router's built-in detection
       server.middlewares.use('/__bini_route_match', async (req: IncomingMessage, res: ServerResponse) => {
         try {
           const url = new URL(req.url || '', `http://${req.headers.host}`);
@@ -1102,7 +1140,7 @@ function biniRoutesPlugin(): BiniPlugin {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Public API (named export only)
+// Public API
 // ─────────────────────────────────────────────────────────────
 export function biniOverlay(options: BiniOverlayOptions = {}): PluginOption[] {
   return [
