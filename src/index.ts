@@ -43,6 +43,8 @@ const CHECK_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" 
 const PREV_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.24996 12.0608L8.71963 11.5304L5.89641 8.70722C5.50588 8.3167 5.50588 7.68353 5.89641 7.29301L8.71963 4.46978L9.24996 3.93945L10.3106 5.00011L9.78029 5.53044L7.31062 8.00011L9.78029 10.4698L10.3106 11.0001L9.24996 12.0608Z" fill="currentColor"/></svg>`;
 const NEXT_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.75011 3.93945L7.28044 4.46978L10.1037 7.29301C10.4942 7.68353 10.4942 8.3167 10.1037 8.70722L7.28044 11.5304L6.75011 12.0608L5.68945 11.0001L6.21978 10.4698L8.68945 8.00011L6.21978 5.53044L5.68945 5.00011L6.75011 3.93945Z" fill="currentColor"/></svg>`;
 const CHEVRON_RIGHT = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none"><path fill="#666" fill-rule="evenodd" clip-rule="evenodd" d="M5.50011 1.93945L6.03044 2.46978L10.8537 7.293C11.2442 7.68353 11.2442 8.31669 10.8537 8.70722L6.03044 13.5304L5.50011 14.0608L4.43945 13.0001L4.96978 12.4698L9.43945 8.00011L4.96978 3.53044L4.43945 3.00011L5.50011 1.93945Z"></path></svg>`;
+const CHEVRON_UP = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M3.93945 10.5001L4.46978 9.96978L8.00011 6.44011L11.5304 9.96978L12.0608 10.5001L13.0001 9.43945L12.4698 8.90912L8.53044 4.96978C8.23756 4.67689 7.76267 4.67689 7.46978 4.96978L3.53044 8.90912L3.00011 9.43945L3.93945 10.5001Z" fill="currentColor"/></svg>`;
+const CHEVRON_DOWN = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M12.0608 5.50011L11.5304 6.03044L8.00011 9.56011L4.46978 6.03044L3.93945 5.50011L3.00011 6.56078L3.53044 7.09111L7.46978 11.0304C7.76267 11.3233 8.23756 11.3233 8.53044 11.0304L12.4698 7.09111L13.0001 6.56078L12.0608 5.50011Z" fill="currentColor"/></svg>`;
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -334,7 +336,6 @@ function biniLoadingPlugin(): BiniPlugin {
 
   el.addEventListener("click", function(e) {
     e.stopPropagation();
-    // Always toggle menu - even when there are errors
     toggleMenu(e);
   });
   
@@ -401,7 +402,7 @@ function biniLoadingPlugin(): BiniPlugin {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PLUGIN 2 — Error overlay with StackTracey integration
+// PLUGIN 2 — Error overlay
 // ─────────────────────────────────────────────────────────────
 function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   const shikiTheme = options.shikiTheme || 'dark-plus';
@@ -432,93 +433,203 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
 
         const overlayHtml = `
 <style>
-  #__bini_error_content::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+  /* ── Main overlay content scroll ── */
+  #__bini_error_content::-webkit-scrollbar { width: 8px !important; height: 8px !important; }
+  #__bini_error_content::-webkit-scrollbar-track { background: ${theme.surfaceMuted}; border-radius: 4px; }
+  #__bini_error_content::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 4px; }
+  #__bini_error_content::-webkit-scrollbar-thumb:hover { background: #666; }
+  #__bini_error_content { 
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    scrollbar-width: auto !important;
+    scrollbar-color: #4a4a4a ${theme.surfaceMuted} !important;
   }
-  #__bini_error_content::-webkit-scrollbar-track {
-    background: ${theme.surfaceMuted};
-    border-radius: 4px;
+
+  /* ── Code block scroll ── */
+  .bini-code-scroll {
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    max-height: 400px;
+    display: block;
+    position: relative;
   }
-  #__bini_error_content::-webkit-scrollbar-thumb {
-    background: #3a3a3a;
-    border-radius: 4px;
+  .bini-code-scroll::-webkit-scrollbar { 
+    width: 10px !important; 
+    height: 10px !important; 
+    display: block !important;
+  }
+  .bini-code-scroll::-webkit-scrollbar-track { 
+    background: ${theme.surfaceMuted}; 
+    border-radius: 5px;
+    margin: 2px;
+  }
+  .bini-code-scroll::-webkit-scrollbar-thumb { 
+    background: #5a5a5a; 
+    border-radius: 5px;
     border: 1px solid ${theme.border};
   }
-  #__bini_error_content::-webkit-scrollbar-thumb:hover {
-    background: #4a4a4a;
+  .bini-code-scroll::-webkit-scrollbar-thumb:hover { 
+    background: #7a7a7a; 
   }
-  #__bini_error_content {
-    scrollbar-width: thin;
-    scrollbar-color: #3a3a3a ${theme.surfaceMuted};
+  .bini-code-scroll::-webkit-scrollbar-corner { 
+    background: ${theme.surfaceMuted}; 
   }
-  #__bini_error_content pre {
-    overflow-x: auto;
-    white-space: pre;
+  .bini-code-scroll { 
+    scrollbar-width: auto !important;
+    scrollbar-color: #5a5a5a ${theme.surfaceMuted} !important;
   }
-  #__bini_error_content pre::-webkit-scrollbar {
-    height: 6px;
+
+  /* ── Call stack scroll ── */
+  .bini-stack-scroll {
+    max-height: 300px;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    display: block;
   }
-  #__bini_error_content pre::-webkit-scrollbar-track {
-    background: transparent;
+  .bini-stack-scroll::-webkit-scrollbar { 
+    width: 10px !important;
+    display: block !important;
   }
-  #__bini_error_content pre::-webkit-scrollbar-thumb {
-    background: #3a3a3a;
-    border-radius: 3px;
+  .bini-stack-scroll::-webkit-scrollbar-track { 
+    background: ${theme.surfaceMuted}; 
+    border-radius: 5px;
+    margin: 2px;
   }
-  .bini-code-scroll {
-    overflow-x: auto;
+  .bini-stack-scroll::-webkit-scrollbar-thumb { 
+    background: #5a5a5a; 
+    border-radius: 5px;
+    border: 1px solid ${theme.border};
   }
-  .bini-code-scroll::-webkit-scrollbar {
-    height: 8px;
+  .bini-stack-scroll::-webkit-scrollbar-thumb:hover { 
+    background: #7a7a7a; 
   }
-  .bini-code-scroll::-webkit-scrollbar-track {
-    background: ${theme.surfaceMuted};
-    border-radius: 4px;
+  .bini-stack-scroll { 
+    scrollbar-width: auto !important;
+    scrollbar-color: #5a5a5a ${theme.surfaceMuted} !important;
   }
-  .bini-code-scroll::-webkit-scrollbar-thumb {
-    background: #3a3a3a;
-    border-radius: 4px;
+
+  /* ── Component stack scroll ── */
+  .bini-component-scroll { 
+    max-height: 200px; 
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
   }
-  .bini-code-scroll {
-    scrollbar-width: thin;
-    scrollbar-color: #3a3a3a ${theme.surfaceMuted};
+  .bini-component-scroll::-webkit-scrollbar { 
+    width: 10px !important;
+    display: block !important;
   }
-  .bini-stack-frame {
+  .bini-component-scroll::-webkit-scrollbar-track { 
+    background: ${theme.surfaceMuted}; 
+    border-radius: 5px;
+  }
+  .bini-component-scroll::-webkit-scrollbar-thumb { 
+    background: #5a5a5a; 
+    border-radius: 5px;
+  }
+  .bini-component-scroll { 
+    scrollbar-width: auto !important;
+    scrollbar-color: #5a5a5a ${theme.surfaceMuted} !important;
+  }
+
+  /* ── Collapsible call stack ── */
+  .bini-stack-body {
+    overflow: hidden;
+    transition: max-height 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s;
+    max-height: 400px;
+    opacity: 1;
+  }
+  .bini-stack-body.collapsed {
+    max-height: 0 !important;
+    opacity: 0;
+  }
+  .bini-stack-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     cursor: pointer;
-    transition: background 0.15s;
+    user-select: none;
+    padding: 0;
+    background: none;
+    border: none;
+    width: 100%;
+    color: inherit;
   }
-  .bini-stack-frame:hover {
-    background: rgba(255,255,255,0.06) !important;
+  .bini-stack-toggle:hover .bini-stack-toggle-label {
+    color: #e4e4e7;
+  }
+  .bini-stack-toggle-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: color 0.15s;
+  }
+  .bini-stack-chevron {
+    display: flex;
+    align-items: center;
+    color: #6b7280;
+    transition: color 0.15s, transform 0.2s;
+  }
+  .bini-stack-toggle:hover .bini-stack-chevron {
+    color: #9ca3af;
+  }
+
+  #__bini_error_content pre {
+    overflow-x: auto !important;
+    white-space: pre !important;
+    margin: 0;
+    padding: 0;
+  }
+  #__bini_error_content pre::-webkit-scrollbar { 
+    height: 8px !important;
+    display: block !important;
+  }
+  #__bini_error_content pre::-webkit-scrollbar-track { 
+    background: transparent; 
+  }
+  #__bini_error_content pre::-webkit-scrollbar-thumb { 
+    background: #5a5a5a; 
+    border-radius: 4px;
   }
 </style>
 <div id="__bini_root" style="position:fixed;inset:0;z-index:2147483646;display:flex;flex-direction:column;align-items:center;padding-top:10vh;padding-left:15px;padding-right:15px;background:${theme.bg};font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;display:none;">
   <div id="__bini_backdrop" style="position:fixed;inset:0;z-index:-1;background:${theme.bg};"></div>
+  
+  <!-- Top Bar -->
   <div style="position:relative;z-index:2;display:flex;width:100%;max-width:${theme.maxWidth};align-items:flex-end;justify-content:space-between;">
-    <div style="display:flex;gap:8px;background:${theme.surface};padding:12px;border-radius:16px 16px 0 0;border:1px solid ${theme.border};border-bottom:none;">
+    <div style="display:flex;gap:8px;background:${theme.surface};padding:12px 16px;border-radius:16px 16px 0 0;border:1.5px solid ${theme.border};border-bottom:none;box-shadow:0 -2px 10px rgba(0,0,0,0.3);">
       <button id="__bini_prev" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:${theme.chipBg};border-radius:8px;border:1px solid ${theme.border};cursor:pointer;color:${theme.text};transition:all 0.2s;">${PREV_ICON}</button>
       <div style="display:inline-flex;align-items:center;justify-content:center;min-width:48px;height:32px;color:${theme.text};font-size:13px;background:${theme.chipBg};border-radius:8px;padding:0 12px;border:1px solid ${theme.border};">
         <span id="__bini_current">1</span>
-        <span>/</span>
+        <span style="margin:0 4px;">/</span>
         <span id="__bini_total">1</span>
       </div>
       <button id="__bini_next" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:${theme.chipBg};border-radius:8px;border:1px solid ${theme.border};cursor:pointer;color:${theme.text};transition:all 0.2s;">${NEXT_ICON}</button>
     </div>
-    <div style="display:flex;align-items:center;background:${theme.surface};padding:8px 24px;border-radius:16px 16px 0 0;border:1px solid ${theme.border};border-bottom:none;">
-      <span style="font-size:14px;font-weight:500;background:linear-gradient(135deg,#00CFFF,#0077FF);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Bini.js</span>
+    <div style="display:flex;align-items:center;background:${theme.surface};padding:12px 24px;border-radius:16px 16px 0 0;border:1.5px solid ${theme.border};border-bottom:none;box-shadow:0 -2px 10px rgba(0,0,0,0.3);">
+      <span style="font-size:15px;font-weight:600;letter-spacing:0.5px;">
+        <span style="color:#e4e4e7;">Bini.js</span>
+        <span style="color:${theme.textMuted};margin:0 6px;font-weight:400;">·</span>
+        <span style="color:#e4e4e7;font-weight:700;">Rolldown</span>
+      </span>
     </div>
   </div>
-  <div style="position:relative;z-index:10;display:flex;width:100%;max-width:${theme.maxWidth};flex-direction:column;overflow:hidden;border-radius:0 0 16px 16px;background:${theme.surface};color:${theme.text};box-shadow:0 8px 30px rgba(0,0,0,0.6);border:1px solid ${theme.border};border-top:none;">
-    <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid ${theme.border};background:${theme.surface};padding:12px 20px;">
+  
+  <!-- Main content area -->
+  <div style="position:relative;z-index:10;display:flex;width:100%;max-width:${theme.maxWidth};flex-direction:column;overflow:hidden;border-radius:0 0 16px 16px;background:${theme.surface};color:${theme.text};box-shadow:0 8px 30px rgba(0,0,0,0.6);border:1.5px solid ${theme.border};border-top:none;">
+    <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid ${theme.border};background:${theme.surface};padding:14px 20px;">
       <div style="display:flex;align-items:center;gap:12px;flex:1;">
         <span id="__bini_heading" style="color:${theme.accent};font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;font-size:12px;background:rgba(248,113,113,0.12);padding:4px 12px;border-radius:20px;border:1px solid rgba(248,113,113,0.25);white-space:nowrap;"></span>
-        <span id="__bini_file_info" style="font-size:11px;font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;color:${theme.info};background:rgba(59,130,246,0.1);padding:4px 8px;border-radius:6px;"></span>
+        <span id="__bini_file_info" style="font-size:11px;font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;color:${theme.info};background:rgba(59,130,246,0.1);padding:4px 8px;border-radius:6px;border:1px solid rgba(59,130,246,0.2);"></span>
       </div>
       <div style="display:flex;gap:8px;">
         <button id="__bini_copy" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:${theme.chipBg};border:1px solid ${theme.border};border-radius:8px;cursor:pointer;color:${theme.text};transition:all 0.2s;">${COPY_ICON}</button>
       </div>
     </div>
-    <div id="__bini_error_content" style="padding:24px;max-height:60vh;overflow-y:auto;font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;"></div>
+    <!-- Scrollable main content — each section scrolls independently -->
+    <div id="__bini_error_content" style="padding:24px;font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;max-height:65vh;overflow-y:auto;overflow-x:hidden;">
+    </div>
   </div>
 </div>`;
 
@@ -532,42 +643,18 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   var overlayRoot = null;
   var shikiHighlighter = null;
   var shikiLoadPromise = null;
-  var StackTracey = null;
-  var stacktraceyLoadPromise = null;
+  var filteredCount = 0;
+  // Track collapsed state of call stack per error index
+  var stackCollapsedState = {};
 
   var _errorHandler = null;
   var _rejectionHandler = null;
   var _biniErrorHandler = null;
   
-  // Load StackTracey from CDN
-  function loadStackTracey() {
-    if (stacktraceyLoadPromise) return stacktraceyLoadPromise;
-    stacktraceyLoadPromise = new Promise(function(resolve) {
-      if (window.StackTracey) {
-        StackTracey = window.StackTracey;
-        resolve(window.StackTracey);
-        return;
-      }
-      var script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/stacktracey@2.1.8/stacktracey.min.js";
-      script.onload = function() {
-        StackTracey = window.StackTracey;
-        resolve(window.StackTracey);
-      };
-      script.onerror = function() { 
-        console.warn("[Bini] Failed to load StackTracey, falling back to basic stack parsing");
-        resolve(null); 
-      };
-      document.head.appendChild(script);
-    });
-    return stacktraceyLoadPromise;
-  }
-  
   function shortenPath(filePath) {
     if (!filePath) return '';
     var path = filePath || '';
     path = path.replace(/^vite:/, '').replace(/^vite\\\\x00/, '').replace(/\\x00/g, '');
-    path = path.replace(/^webpack:\\/\\//, '').replace(/^\\w+:\\/\\//, '');
     var match = path.match(/(?:src|app)[\\/\\\\].*$/);
     return match ? match[0] : path.split(/[\\/\\\\]/).slice(-2).join('/');
   }
@@ -584,13 +671,23 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       .trim();
   }
 
-  // Check if error is a dynamic import failure
-  function isDynamicImportError(message) {
-    var msg = message || '';
-    return msg.includes('Failed to fetch dynamically imported module') ||
-           msg.includes('Importing a module script failed') ||
-           msg.includes('error loading dynamically imported module') ||
-           msg.includes('Failed to load module script');
+  function parseStack(stack) {
+    if (!stack) return [];
+    var frames = [];
+    var lines = stack.split("\\n");
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (line.includes('vite:oxc')) continue;
+      var match = line.match(/^at\\s+(?:(.+?)\\s+\\()?(.+?):(\\d+):(\\d+)\\)?$/);
+      if (match) {
+        var fnName = match[1] || null;
+        var file = match[2];
+        var ln = match[3];
+        var shortFile = shortenPath(file);
+        frames.push({ fn: fnName, file: shortFile, line: ln });
+      }
+    }
+    return frames.slice(0, 6);
   }
 
   function langFromFile(filePath) {
@@ -657,74 +754,29 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     }
     return "<pre style='margin:0;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;'><code>" + escapeHtml(code) + "</code></pre>";
   }
-  
-  // Format stack frames from StackTracey
-  function formatStackTraceyFrames(frames) {
-    if (!frames || frames.length === 0) return "";
-    
-    var html = "<div style='margin-top:20px;'>";
-    html += "<div style='font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;'>Call Stack (Source Mapped)</div>";
-    html += "<div style='background:#0a0a0a;border:1px solid rgba(255,255,255,0.08);border-radius:8px;overflow:hidden;'>";
-    
-    for (var j = 0; j < frames.length; j++) {
-      var f = frames[j];
-      var displayFile = f.sourceFile || f.file || '';
-      if (displayFile) {
-        displayFile = shortenPath(displayFile);
-      }
-      var displayLine = f.sourceLine || f.line || '';
-      var displayFn = f.callee || f.functionName || '<anonymous>';
-      
-      html += "<div class='bini-stack-frame' data-file='" + escapeHtml(f.sourceFile || f.file || '') + "' data-line='" + (f.sourceLine || f.line || '') + "' style='padding:8px 16px;border-bottom:1px solid rgba(255,255,255,0.04);font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:12px;'>";
-      html += "<span style='color:#6b7280;'>▶</span> ";
-      html += "<span style='color:#60a5fa;'>" + escapeHtml(displayFn) + "</span>";
-      html += "<span style='color:#6b7280;'> @ </span>";
-      html += "<span style='color:#10b981;'>" + escapeHtml(displayFile) + "</span>";
-      if (displayLine) {
-        html += "<span style='color:#6b7280;'>:</span><span style='color:#fbbf24;'>" + displayLine + "</span>";
-      }
-      html += "</div>";
-    }
-    
-    html += "</div></div>";
-    return html;
-  }
-  
-  function formatErrorMessage(message, codeLines, fileLang, mappedFrames, err) {
+
+  // SVG chevrons inlined as strings for the collapsible toggle
+  var CHEVRON_UP_SVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M3.93945 10.5001L4.46978 9.96978L8.00011 6.44011L11.5304 9.96978L12.0608 10.5001L13.0001 9.43945L12.4698 8.90912L8.53044 4.96978C8.23756 4.67689 7.76267 4.67689 7.46978 4.96978L3.53044 8.90912L3.00011 9.43945L3.93945 10.5001Z" fill="currentColor"/></svg>';
+  var CHEVRON_DOWN_SVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M12.0608 5.50011L11.5304 6.03044L8.00011 9.56011L4.46978 6.03044L3.93945 5.50011L3.00011 6.56078L3.53044 7.09111L7.46978 11.0304C7.76267 11.3233 8.23756 11.3233 8.53044 11.0304L12.4698 7.09111L13.0001 6.56078L12.0608 5.50011Z" fill="currentColor"/></svg>';
+
+  function formatErrorMessage(message, codeLines, fileLang, stack, err, errIndex) {
     var lang = fileLang || "javascript";
     var cleanMsg = cleanErrorMessage(message);
     var lines = cleanMsg.split("\\n");
     var html = "<div style='font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.6;'>";
-    
-    // Show error location header
-    if (err && err.file) {
-      html += "<div style='display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:8px 12px;background:rgba(239,68,68,0.05);border-left:3px solid #ef4444;border-radius:4px;'>";
-      html += "<span style='color:#ef4444;font-weight:600;font-size:12px;'>📍</span>";
-      html += "<span style='color:#e4e4e7;font-family:monospace;font-size:12px;'>" + escapeHtml(shortenPath(err.file)) + "</span>";
-      if (err.line) {
-        html += "<span style='color:#6b7280;'>:</span>";
-        html += "<span style='color:#60a5fa;font-family:monospace;font-size:12px;'>" + err.line + "</span>";
-      }
-      if (err.column) {
-        html += "<span style='color:#6b7280;'>:</span>";
-        html += "<span style='color:#fbbf24;font-family:monospace;font-size:12px;'>" + err.column + "</span>";
-      }
-      html += "</div>";
-    }
     
     if (err && err.plugin) {
       var pluginName = err.plugin;
       pluginName = pluginName.replace(/^vite:/, '').replace(/^vite\\\\x00/, '').replace(/\\x00/g, '');
       if (pluginName && pluginName !== 'oxc') {
         html += "<div style='display:flex;align-items:center;gap:8px;margin-bottom:16px;'>";
-        html += "<span style='color:#6b7280;font-size:11px;'>Plugin: " + escapeHtml(pluginName) + "</span>";
+        html += "<span style='color:#6b7280;font-size:11px;'>" + escapeHtml(pluginName) + "</span>";
         html += "</div>";
       }
     }
     
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
-      
       if (!line || line === 'vite:oxc' || line.includes('vite:oxc')) continue;
       if (line.includes('NextJs') || line.includes('Turbopack')) continue;
       if (line.includes('╭─[') || line.includes('────╯')) continue;
@@ -738,29 +790,27 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
         html += "</div>";
         continue;
       }
-      
       if (line.match(/Transform failed/)) {
         html += "<div style='color:#f97316;font-weight:500;padding:8px 0;'>" + escapeHtml(line) + "</div>";
         continue;
       }
-      
       if (line.trim() && !line.match(/^\\s*[│|]/) && !line.match(/^\\s*\\d+\\s*[│|]/)) {
         html += "<div style='color:#9ca3af;padding:2px 0;'>" + escapeHtml(stripNonAscii(line)) + "</div>";
       }
     }
     
+    // ── Code block with its own scroll ──
     if (codeLines && codeLines.length > 0) {
-      html += "<div style='margin:16px 0;border:1px solid ${theme.border};border-radius:12px;overflow:hidden;background:${theme.surfaceMuted};'>";
-      html += "<div style='background:${theme.surface};padding:8px 16px;border-bottom:1px solid ${theme.border};font-size:11px;color:#9ca3af;font-weight:500;display:flex;align-items:center;justify-content:space-between;'>";
+      html += "<div style='margin:16px 0;border:1.5px solid rgba(255,255,255,0.08);border-radius:12px;overflow:hidden;background:#050505;'>";
+      html += "<div style='background:#0a0a0a;padding:8px 16px;border-bottom:1.5px solid rgba(255,255,255,0.08);font-size:11px;color:#9ca3af;font-weight:500;display:flex;align-items:center;justify-content:space-between;'>";
       html += "<span style='background:rgba(255,255,255,0.05);padding:2px 8px;border-radius:4px;'>" + lang.toUpperCase() + "</span>";
       if (err && err.file && err.line) {
         html += "<span style='color:#6b7280;'>" + escapeHtml(shortenPath(err.file)) + ":" + err.line + "</span>";
       }
       html += "</div>";
-      
-      html += "<div class='bini-code-scroll' style='overflow-x:auto;'>";
+      // Code scroll container — independent scroll
+      html += "<div class='bini-code-scroll'>";
       html += "<div style='display:inline-block;min-width:100%;padding:12px 0;'>";
-      
       for (var k = 0; k < codeLines.length; k++) {
         var cl = codeLines[k];
         var isErr = cl.includes('>>>');
@@ -769,26 +819,49 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
         var clNum = clNumMatch ? clNumMatch[1] : "";
         var clCode = clNumMatch ? cl.substring(cl.indexOf(':') + 1).trim() : cl;
         clCode = clCode.replace(/^>>>\\s*/, "");
-        
         html += "<div style='display:flex;padding:2px 0;" + clBg + "'>";
         html += "<span style='min-width:55px;padding:0 12px;text-align:right;color:" + (isErr ? "#f87171" : "#6b7280") + ";user-select:none;font-size:11px;font-weight:500;flex-shrink:0;'>" + clNum + "</span>";
         html += "<div style='flex:1;padding:0 12px 0 0;white-space:pre;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.5;'>" + highlightCode(clCode, lang) + "</div>";
         html += "</div>";
       }
-      
       html += "</div></div>";
       html += "</div>";
     }
 
-    // Use mapped frames from StackTracey
-    if (mappedFrames && mappedFrames.length > 0) {
-      html += formatStackTraceyFrames(mappedFrames);
+    // ── Call stack: collapsible header + independent scroll body ──
+    var frames = parseStack(stack);
+    if (frames.length > 0) {
+      var isCollapsed = stackCollapsedState[errIndex] === true;
+      var bodyClass = isCollapsed ? "bini-stack-body collapsed" : "bini-stack-body";
+      var chevronIcon = isCollapsed ? CHEVRON_DOWN_SVG : CHEVRON_UP_SVG;
+
+      html += "<div style='margin-top:20px;' id='bini-stack-section-" + errIndex + "'>";
+      // Toggle button row
+      html += "<button class='bini-stack-toggle' id='bini-stack-toggle-" + errIndex + "' style='margin-bottom:12px;' onclick='window.__bini_toggle_stack(" + errIndex + ")'>";
+      html += "<span class='bini-stack-toggle-label'>Call Stack</span>";
+      html += "<span class='bini-stack-chevron' id='bini-stack-chevron-" + errIndex + "'>" + chevronIcon + "</span>";
+      html += "</button>";
+      // Collapsible body
+      html += "<div class='" + bodyClass + "' id='bini-stack-body-" + errIndex + "'>";
+      html += "<div class='bini-stack-scroll' style='background:#0a0a0a;border:1.5px solid rgba(255,255,255,0.08);border-radius:8px;overflow:hidden;'>";
+      for (var j = 0; j < frames.length; j++) {
+        var f = frames[j];
+        html += "<div style='padding:8px 16px;border-bottom:1px solid rgba(255,255,255,0.04);font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:12px;'>";
+        html += "<span style='color:#60a5fa;'>" + escapeHtml(f.fn || '<anonymous>') + "</span>";
+        html += "<span style='color:#6b7280;'> </span>";
+        html += "<span style='color:#10b981;'>" + escapeHtml(f.file) + "</span>";
+        html += "<span style='color:#6b7280;'>:</span><span style='color:#fbbf24;'>" + f.line + "</span>";
+        html += "</div>";
+      }
+      html += "</div>";
+      html += "</div>"; // end bini-stack-body
+      html += "</div>"; // end section
     }
     
     if (err && err.componentStack) {
       html += "<div style='margin-top:20px;'>";
       html += "<div style='font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;'>Component Stack</div>";
-      html += "<div style='background:#0a0a0a;border:1px solid rgba(255,255,255,0.08);border-radius:8px;overflow:auto;padding:12px;max-height:200px;'>";
+      html += "<div class='bini-component-scroll' style='background:#0a0a0a;border:1.5px solid rgba(255,255,255,0.08);border-radius:8px;overflow:auto;padding:12px;'>";
       html += "<pre style='margin:0;color:#9ca3af;font-size:11px;white-space:pre-wrap;word-break:break-all;'>" + escapeHtml(err.componentStack) + "</pre>";
       html += "</div></div>";
     }
@@ -803,6 +876,22 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       window.__bini_set_error_count(count);
     }
   }
+
+  // ── Global toggle handler for call stack collapse ──
+  window.__bini_toggle_stack = function(errIndex) {
+    stackCollapsedState[errIndex] = !stackCollapsedState[errIndex];
+    var body = document.getElementById("bini-stack-body-" + errIndex);
+    var chevron = document.getElementById("bini-stack-chevron-" + errIndex);
+    if (body) {
+      if (stackCollapsedState[errIndex]) {
+        body.classList.add("collapsed");
+        if (chevron) chevron.innerHTML = '${CHEVRON_DOWN.replace(/'/g, "\\'")}';
+      } else {
+        body.classList.remove("collapsed");
+        if (chevron) chevron.innerHTML = '${CHEVRON_UP.replace(/'/g, "\\'")}';
+      }
+    }
+  };
 
   window.__bini_show_overlay = function() { show(); };
 
@@ -835,19 +924,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       currentIndex = Math.min(errors.length - 1, currentIndex + 1); 
       render(); 
     });
-    
-    // Delegate click events for stack frames
-    overlayRoot.addEventListener("click", function(e) {
-      var frame = e.target.closest(".bini-stack-frame");
-      if (frame) {
-        var file = frame.dataset.file;
-        var line = frame.dataset.line;
-        if (file && line) {
-          console.log("[Bini] Jump to:", file, line);
-          // Could open in editor via custom protocol
-        }
-      }
-    });
   }
   
   function show() {
@@ -856,9 +932,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   
   function render() {
     var err = errors[currentIndex];
-    if (!err || !overlayRoot) {
-      return;
-    }
+    if (!err || !overlayRoot) return;
     
     var cleanMessage = err.originalMessage || err.message;
     
@@ -895,7 +969,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     
     var contentEl = document.getElementById("__bini_error_content");
     if (contentEl) {
-      contentEl.innerHTML = formatErrorMessage(cleanMessage, err.codeLines || [], err.fileLang || "javascript", err.mappedFrames || [], err);
+      contentEl.innerHTML = formatErrorMessage(cleanMessage, err.codeLines || [], err.fileLang || "javascript", err.stack || "", err, currentIndex);
     }
     
     document.getElementById("__bini_current").textContent = currentIndex + 1;
@@ -914,12 +988,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     }
     if (err.plugin) text += "\\nPlugin: " + err.plugin;
     if (err.componentStack) text += "\\n\\nComponent Stack:\\n" + err.componentStack;
-    if (err.mappedFrames && err.mappedFrames.length > 0) {
-      text += "\\n\\nCall Stack:\\n";
-      err.mappedFrames.forEach(function(f) {
-        text += "  at " + (f.callee || '<anonymous>') + " (" + (f.sourceFile || f.file || '') + ":" + (f.sourceLine || f.line || '') + ")\\n";
-      });
-    }
+    text += "\\n\\n" + (err.stack || "");
     navigator.clipboard.writeText(text).catch(function() {});
   }
   
@@ -930,50 +999,86 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     return file + ":" + line + ":" + msg;
   }
 
-  async function processErrorWithStackTracey(err) {
-    if (!StackTracey) return [];
-    
-    try {
-      // Create stack trace from error
-      var stack = new StackTracey(err);
-      // Fetch sources and apply source maps
-      var mappedStack = await stack.withSourcesAsync();
-      
-      // Extract clean frames
-      return mappedStack.items.filter(function(frame) {
-        var file = frame.sourceFile || frame.file || '';
-        return !file.includes('node_modules') && 
-               !file.includes('/@vite/') && 
-               !file.includes('/@vitejs/') &&
-               !file.includes('chunk-') &&
-               !file.includes('?v=');
-      });
-    } catch (e) {
-      console.warn("[Bini] StackTracey processing failed:", e);
-      return [];
-    }
+  function isRealError(err) {
+    var msg = (err.originalMessage || err.message || '');
+    if (msg.includes('PARSE_ERROR')) return true;
+    if (msg.includes('Expected')) return true;
+    if (msg.includes('Unexpected token')) return true;
+    if (msg.includes('Transform failed')) return true;
+    if (msg.includes('SyntaxError')) return true;
+    if (msg.includes('TypeError')) return true;
+    if (msg.includes('ReferenceError')) return true;
+    if (err.plugin === 'vite:oxc') return true;
+    if (err._type === 'runtime') return true;
+    return false;
+  }
+  
+  function isCascadeError(err) {
+    var msg = (err.originalMessage || err.message || '');
+    if (msg.includes('Failed to fetch dynamically imported module')) return true;
+    if (msg.includes('Failed to resolve import')) return true;
+    if (msg.includes('Failed to load module')) return true;
+    if (msg.includes('Loading chunk')) return true;
+    if (msg.includes('ChunkLoadError')) return true;
+    return false;
   }
 
-  async function addError(err) {
+  function prioritizeErrors() {
+    errors.sort(function(a, b) {
+      var aReal = isRealError(a);
+      var bReal = isRealError(b);
+      if (aReal && !bReal) return -1;
+      if (!aReal && bReal) return 1;
+      var aMsg = a.message || '';
+      var bMsg = b.message || '';
+      if (aMsg.includes('PARSE_ERROR') || aMsg.includes('Expected')) return -1;
+      if (bMsg.includes('PARSE_ERROR') || bMsg.includes('Expected')) return 1;
+      if (aMsg.includes('Transform failed')) return -1;
+      if (bMsg.includes('Transform failed')) return 1;
+      return 0;
+    });
+    var seen = new Set();
+    errors = errors.filter(function(e) {
+      var key = getErrorKey(e);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function addError(err) {
     err.originalMessage = err.message;
+    var errorMessage = err.originalMessage || err.message || '';
+    var hasRealErrors = errors.some(isRealError);
     
-    // Filter dynamic import errors
-    if (isDynamicImportError(err.message)) {
-      console.warn('[Bini] Filtered dynamic import error:', err.message);
+    if (isCascadeError(err) && hasRealErrors) {
+      filteredCount++;
+      console.warn('[Bini] Filtered cascade error #' + filteredCount + ': ' + errorMessage.substring(0, 100));
       return;
     }
-
+    if (isRealError(err)) {
+      var beforeCount = errors.length;
+      errors = errors.filter(function(e) {
+        if (isCascadeError(e)) { filteredCount++; return false; }
+        return true;
+      });
+      if (beforeCount !== errors.length) {
+        console.warn('[Bini] Cleared ' + (beforeCount - errors.length) + ' cascade errors due to real compilation error');
+      }
+    }
     var key = getErrorKey(err);
     var existing = errors.some(function(e) { return getErrorKey(e) === key; });
     if (!existing) {
-      // Process stack with StackTracey
-      err.mappedFrames = await processErrorWithStackTracey(err);
-      
       errors.push(err);
-      currentIndex = errors.length - 1;
+      prioritizeErrors();
+      currentIndex = 0;
+      stackCollapsedState = {};
       ensureOverlay();
       loadShiki().then(function() { render(); });
       updateBadge();
+      if (filteredCount > 0) {
+        console.log('[Bini] Filtered ' + filteredCount + ' misleading errors total');
+      }
     }
   }
 
@@ -985,25 +1090,15 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   
   function extractFileFromError(message, stack) {
     var moduleMatch = (message || '').match(/module ['"]([^'"]+)['"]/);
-    if (moduleMatch) {
-      return { file: moduleMatch[1], line: 1 };
-    }
+    if (moduleMatch) return { file: moduleMatch[1], line: 1 };
     var fileMatch = (stack || '').match(/([^\\s(]+\\.(?:tsx?|jsx?|js|ts)):(\\d+):(\\d+)/);
-    if (fileMatch) {
-      return { file: fileMatch[1], line: parseInt(fileMatch[2], 10) };
-    }
+    if (fileMatch) return { file: fileMatch[1], line: parseInt(fileMatch[2], 10) };
     return { file: '', line: null };
   }
   
-  _biniErrorHandler = async function(e) {
+  _biniErrorHandler = function(e) {
     var detail = e.detail;
     if (detail) {
-      // Filter dynamic import errors
-      if (isDynamicImportError(detail.message)) {
-        console.warn('[Bini] Filtered custom error:', detail.message);
-        return;
-      }
-      
       var fileInfo = extractFileFromError(detail.message, detail.stack);
       var errorObj = {
         name: detail.name || "Runtime Error",
@@ -1014,20 +1109,17 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
         file: detail.file || fileInfo.file || "",
         line: detail.line || fileInfo.line || null,
       };
-      
       var stackMatch = (detail.stack || "").match(/([^\\s(]+\\.(?:tsx?|jsx?)):(\\d+):(\\d+)/);
       if (stackMatch && !errorObj.file) {
         errorObj.fileLang = langFromFile(stackMatch[1]);
         errorObj.file = errorObj.file || stackMatch[1];
         errorObj.line = errorObj.line || parseInt(stackMatch[2], 10);
         fetchCodeLines(stackMatch[1], parseInt(stackMatch[2], 10)).then(function(lines) {
-          errorObj.codeLines = lines;
-          addError(errorObj);
+          errorObj.codeLines = lines; addError(errorObj);
         }).catch(function() { addError(errorObj); });
       } else if (errorObj.file && errorObj.line) {
         fetchCodeLines(errorObj.file, errorObj.line).then(function(lines) {
-          errorObj.codeLines = lines;
-          addError(errorObj);
+          errorObj.codeLines = lines; addError(errorObj);
         }).catch(function() { addError(errorObj); });
       } else {
         addError(errorObj);
@@ -1036,15 +1128,8 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   };
   window.addEventListener("__bini_error__", _biniErrorHandler);
   
-  _errorHandler = async function(e) {
+  _errorHandler = function(e) {
     e.preventDefault();
-    
-    // Filter dynamic import errors
-    if (isDynamicImportError(e.message)) {
-      console.warn('[Bini] Filtered error:', e.message);
-      return;
-    }
-    
     var fileInfo = extractFileFromError(e.message, (e.error && e.error.stack) || '');
     var errorObj = {
       name: (e.error && e.error.name) || "Runtime Error",
@@ -1059,13 +1144,11 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       errorObj.file = errorObj.file || stackMatch[1];
       errorObj.line = errorObj.line || parseInt(stackMatch[2], 10);
       fetchCodeLines(stackMatch[1], parseInt(stackMatch[2], 10)).then(function(lines) {
-        errorObj.codeLines = lines;
-        addError(errorObj);
+        errorObj.codeLines = lines; addError(errorObj);
       }).catch(function() { addError(errorObj); });
     } else if (errorObj.file && errorObj.line) {
       fetchCodeLines(errorObj.file, errorObj.line).then(function(lines) {
-        errorObj.codeLines = lines;
-        addError(errorObj);
+        errorObj.codeLines = lines; addError(errorObj);
       }).catch(function() { addError(errorObj); });
     } else {
       addError(errorObj);
@@ -1073,17 +1156,9 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   };
   window.addEventListener("error", _errorHandler);
 
-  _rejectionHandler = async function(e) {
+  _rejectionHandler = function(e) {
     e.preventDefault();
     var r = e.reason;
-    
-    // Filter dynamic import rejections
-    var message = (r && r.message) || String(r);
-    if (isDynamicImportError(message)) {
-      console.warn('[Bini] Filtered rejection:', message);
-      return;
-    }
-    
     var fileInfo = extractFileFromError((r && r.message) || String(r), (r && r.stack) || '');
     var errorObj = {
       name: (r && r.name) || "Unhandled Rejection",
@@ -1098,13 +1173,11 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       errorObj.file = stackMatch[1];
       errorObj.line = parseInt(stackMatch[2], 10);
       fetchCodeLines(stackMatch[1], parseInt(stackMatch[2], 10)).then(function(lines) {
-        errorObj.codeLines = lines;
-        addError(errorObj);
+        errorObj.codeLines = lines; addError(errorObj);
       }).catch(function() { addError(errorObj); });
     } else if (errorObj.file && errorObj.line) {
       fetchCodeLines(errorObj.file, errorObj.line).then(function(lines) {
-        errorObj.codeLines = lines;
-        addError(errorObj);
+        errorObj.codeLines = lines; addError(errorObj);
       }).catch(function() { addError(errorObj); });
     } else {
       addError(errorObj);
@@ -1113,10 +1186,9 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   window.addEventListener("unhandledrejection", _rejectionHandler);
   
   if (import.meta && import.meta.hot) {
-    import.meta.hot.on("vite:error", async function(data) {
+    import.meta.hot.on("vite:error", function(data) {
       var err = data && data.err;
       var errorObj;
-      
       if (err) {
         errorObj = {
           name: err.id ? "Build Error" : "Vite Error",
@@ -1128,6 +1200,20 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
           column: (err.loc && err.loc.column) || null,
           plugin: err.plugin || null,
         };
+        var isRealErr = errorObj.message.includes('PARSE_ERROR') || 
+                        errorObj.message.includes('Expected') ||
+                        errorObj.message.includes('Transform failed');
+        if (isRealErr) {
+          var beforeCount = errors.length;
+          errors = errors.filter(function(e) {
+            return !e.message.includes('Failed to fetch dynamically imported module') &&
+                   !e.message.includes('Failed to resolve import');
+          });
+          if (beforeCount !== errors.length) {
+            filteredCount += (beforeCount - errors.length);
+            console.warn('[Bini] Cleared cascade errors due to parse error');
+          }
+        }
         var fileForContext = errorObj.file || "";
         var lineForContext = errorObj.line;
         if (!lineForContext) {
@@ -1140,13 +1226,10 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
             errorObj.line = errorObj.line || lineForContext;
           }
         }
-        if (fileForContext) {
-          errorObj.fileLang = langFromFile(fileForContext);
-        }
+        if (fileForContext) errorObj.fileLang = langFromFile(fileForContext);
         if (fileForContext && lineForContext) {
           fetchCodeLines(fileForContext, lineForContext).then(function(lines) {
-            errorObj.codeLines = lines;
-            addError(errorObj);
+            errorObj.codeLines = lines; addError(errorObj);
           }).catch(function() { addError(errorObj); });
         } else {
           addError(errorObj);
@@ -1179,7 +1262,9 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
         errors = [];
       }
       currentIndex = Math.max(0, Math.min(currentIndex, errors.length - 1));
+      stackCollapsedState = {};
       if (errors.length === 0) {
+        filteredCount = 0;
         updateBadge();
       } else {
         render();
@@ -1189,7 +1274,9 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     
     import.meta.hot.on("vite:afterUpdate", function() {
       errors = [];
+      filteredCount = 0;
       currentIndex = 0;
+      stackCollapsedState = {};
       updateBadge();
       window.dispatchEvent(new CustomEvent('__bini_clear_errors__'));
     });
@@ -1199,8 +1286,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     });
   }
   
-  // Load StackTracey and Shiki
-  Promise.all([loadStackTracey(), loadShiki()]).catch(console.warn);
+  loadShiki();
 })();
 `.trim();
 
@@ -1265,7 +1351,7 @@ function biniCodeContextPlugin(): BiniPlugin {
           const line = parseInt(lineStr, 10);
           let cleanPath = decodeURIComponent(filePath)
             .replace(/^vite:/, '')
-            .replace(/\\x00/g, '')
+            .replace(/\x00/g, '')
             .replace(/\?.*$/, '');
             
           if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
