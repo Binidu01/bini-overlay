@@ -21,14 +21,6 @@ interface BiniPlugin extends Plugin {
   apply?: 'serve' | 'build' | ((this: void, config: any, env: any) => boolean);
 }
 
-interface RouteInfo {
-  method: string;
-  path: string;
-  file: string;
-  type: 'static' | 'dynamic';
-  pattern?: string;
-}
-
 // ─────────────────────────────────────────────────────────────
 // Shared constants
 // ─────────────────────────────────────────────────────────────
@@ -371,16 +363,15 @@ function biniLoadingPlugin(): BiniPlugin {
       routeNameEl.textContent = window.location.pathname || '/';
     }
     
-    var currentPath = window.location.pathname || '/';
-    
-    fetch('/__bini_route_match?path=' + encodeURIComponent(currentPath))
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
+    // Use router's built-in route type detection
+    if (window.__bini_get_route_type) {
+      try {
+        var routeType = window.__bini_get_route_type();
         if (routeTypeEl) {
-          if (data.type === 'dynamic') {
+          if (routeType === 'dynamic') {
             routeTypeEl.textContent = 'Dynamic';
             routeTypeEl.style.color = '#fbbf24';
-          } else if (data.type === 'static') {
+          } else if (routeType === 'static') {
             routeTypeEl.textContent = 'Static';
             routeTypeEl.style.color = '#10b981';
           } else {
@@ -388,13 +379,14 @@ function biniLoadingPlugin(): BiniPlugin {
             routeTypeEl.style.color = '#ef4444';
           }
         }
-      })
-      .catch(function() {
+      } catch (e) {
+        // Fallback to static
         if (routeTypeEl) {
           routeTypeEl.textContent = 'Static';
           routeTypeEl.style.color = '#10b981';
         }
-      });
+      }
+    }
   }
   
   updateMenuInfo();
@@ -492,16 +484,20 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
 
   var _errorHandler = null;
   var _rejectionHandler = null;
+  var _biniErrorHandler = null;
   var _keydownHandler = null;
   
   function shortenPath(filePath) {
     if (!filePath) return '';
-    var match = filePath.match(/(?:src|app)[\\/\\\\].*$/);
-    return match ? match[0] : filePath.split(/[\\/\\\\]/).slice(-2).join('/');
+    var path = filePath || '';
+    // Remove any "vite:" prefixes
+    path = path.replace(/^vite:/, '');
+    var match = path.match(/(?:src|app)[\\/\\\\].*$/);
+    return match ? match[0] : path.split(/[\\/\\\\]/).slice(-2).join('/');
   }
   
   function stripNonAscii(str) {
-    return str.replace(/[^\\x20-\\x7E]/g, '').trim();
+    return (str || '').replace(/[^\\x20-\\x7E]/g, '').trim();
   }
 
   function parseStack(stack) {
@@ -592,7 +588,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   
   function formatErrorMessage(message, codeLines, fileLang, stack, err) {
     var lang = fileLang || "javascript";
-    var lines = message.split("\\n");
+    var lines = (message || '').split("\\n");
     var html = "<div style='font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.6;'>";
     
     if (err && err.plugin) {
@@ -739,7 +735,9 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     if (headingEl) {
       var errorType;
       var msg = cleanMessage || "";
-      if (err.name === "Unhandled Rejection") {
+      if (err._type === 'runtime') {
+        errorType = "Runtime Error";
+      } else if (err.name === "Unhandled Rejection") {
         errorType = "Unhandled Rejection";
       } else if (msg.match(/SyntaxError|PARSE_ERROR|Unexpected token|Expected/i)) {
         errorType = "Parse Error";
@@ -760,6 +758,8 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     var fileInfoEl = document.getElementById("__bini_file_info");
     if (fileInfoEl && err.file) {
       fileInfoEl.textContent = shortenPath(err.file) + (err.line ? ":" + err.line : "");
+    } else if (fileInfoEl) {
+      fileInfoEl.textContent = '';
     }
     
     var contentEl = document.getElementById("__bini_error_content");
@@ -782,6 +782,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       if (err.line) text += ":" + err.line;
     }
     if (err.plugin) text += "\\nPlugin: " + err.plugin;
+    if (err.componentStack) text += "\\n\\nComponent Stack:\\n" + err.componentStack;
     text += "\\n\\n" + (err.stack || "");
     navigator.clipboard.writeText(text).catch(function() {});
   }
@@ -810,8 +811,40 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   function cleanup() {
     if (_errorHandler) { window.removeEventListener("error", _errorHandler); _errorHandler = null; }
     if (_rejectionHandler) { window.removeEventListener("unhandledrejection", _rejectionHandler); _rejectionHandler = null; }
+    if (_biniErrorHandler) { window.removeEventListener("__bini_error__", _biniErrorHandler); _biniErrorHandler = null; }
     if (_keydownHandler) { document.removeEventListener("keydown", _keydownHandler); _keydownHandler = null; }
   }
+  
+  // Listen for errors from the router's error boundary
+  _biniErrorHandler = function(e) {
+    var detail = e.detail;
+    if (detail) {
+      var errorObj = {
+        name: detail.name || "Runtime Error",
+        message: detail.message || "Unknown error",
+        stack: detail.stack || "",
+        componentStack: detail.componentStack || "",
+        _type: detail._type || detail.type || "runtime",
+        file: detail.file || "",
+        line: detail.line || null,
+      };
+      
+      // Try to extract file from stack
+      var stackMatch = (detail.stack || "").match(/([^\\s(]+\\.(?:tsx?|jsx?)):(\\d+):(\\d+)/);
+      if (stackMatch) {
+        errorObj.fileLang = langFromFile(stackMatch[1]);
+        errorObj.file = errorObj.file || stackMatch[1];
+        errorObj.line = errorObj.line || parseInt(stackMatch[2], 10);
+        fetchCodeLines(stackMatch[1], parseInt(stackMatch[2], 10)).then(function(lines) {
+          errorObj.codeLines = lines;
+          addError(errorObj);
+        }).catch(function() { addError(errorObj); });
+      } else {
+        addError(errorObj);
+      }
+    }
+  };
+  window.addEventListener("__bini_error__", _biniErrorHandler);
   
   _errorHandler = function(e) {
     e.preventDefault();
@@ -1006,7 +1039,9 @@ function biniCodeContextPlugin(): BiniPlugin {
           }
           
           const line = parseInt(lineStr, 10);
-          const fullPath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
+          // Clean file path - remove any prefixes
+          let cleanPath = filePath.replace(/^vite:/, '');
+          const fullPath = path.isAbsolute(cleanPath) ? cleanPath : path.join(process.cwd(), cleanPath);
 
           const cwd = process.cwd();
           const resolved = path.resolve(fullPath);
@@ -1041,7 +1076,7 @@ function biniCodeContextPlugin(): BiniPlugin {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PLUGIN 5 — Routes API for Bini Router
+// PLUGIN 5 — Routes API for Bini Router (simplified)
 // ─────────────────────────────────────────────────────────────
 function biniRoutesPlugin(): BiniPlugin {
   return {
@@ -1049,152 +1084,14 @@ function biniRoutesPlugin(): BiniPlugin {
     apply: 'serve',
 
     configureServer(server: ViteDevServer) {
-      // Helper to scan routes - BINI ROUTER SPECIFIC
-      async function scanRoutes(): Promise<RouteInfo[]> {
-        const routes: RouteInfo[] = [];
-        const appDir = path.join(process.cwd(), 'src', 'app');
-        
-        function hasDynamicSegments(routePath: string): boolean {
-          return routePath.split('/').some(seg => 
-            (seg.startsWith('[') && seg.endsWith(']'))
-          );
-        }
-        
-        function createPattern(routePath: string): string {
-          return routePath
-            .replace(/\[\.\.\.(.+)\]/g, '.*')      // [...slug] catch-all
-            .replace(/\[(.+)\]/g, '([^/]+)');       // [id] dynamic segment
-        }
-        
-        async function scanDir(dir: string, basePath: string = '') {
-          if (!fs.existsSync(dir)) return;
-          
-          const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-          
-          // First, scan for flat page files in current directory (bini-router style)
-          for (const entry of entries) {
-            if (entry.isFile()) {
-              const isPageFile = /^(.+)\.(tsx?|jsx?)$/.test(entry.name) &&
-                !entry.name.startsWith('_') &&
-                !entry.name.startsWith('layout') &&
-                !entry.name.startsWith('loading') &&
-                !entry.name.startsWith('not-found') &&
-                !entry.name.startsWith('page') &&
-                !entry.name.startsWith('route');
-              
-              if (isPageFile && basePath === '') {
-                // Flat file in app root: about.tsx → /about
-                const routeName = entry.name.replace(/\.(tsx?|jsx?)$/, '');
-                let routePath = '/' + routeName;
-                routePath = routePath.replace(/\\/g, '/');
-                
-                const type = hasDynamicSegments(routePath) ? 'dynamic' : 'static';
-                const pattern = type === 'dynamic' ? createPattern(routePath) : undefined;
-                
-                routes.push({
-                  method: 'GET',
-                  path: routePath,
-                  file: entry.name,
-                  type,
-                  ...(pattern && { pattern })
-                });
-              }
-            }
-          }
-          
-          // Then scan subdirectories
-          for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            
-            if (entry.isDirectory()) {
-              // Skip private folders and API routes
-              if (!entry.name.startsWith('_') && 
-                  !entry.name.startsWith('.') && 
-                  entry.name !== 'api') {
-                await scanDir(fullPath, basePath + '/' + entry.name);
-              }
-            } else {
-              // Handle page.tsx in subdirectories
-              if (entry.name === 'page.tsx' || entry.name === 'page.ts' || 
-                  entry.name === 'page.jsx' || entry.name === 'page.js') {
-                let routePath = basePath || '/';
-                routePath = routePath.replace(/\\/g, '/');
-                if (!routePath.startsWith('/')) routePath = '/' + routePath;
-                
-                const type = hasDynamicSegments(routePath) ? 'dynamic' : 'static';
-                const pattern = type === 'dynamic' ? createPattern(routePath) : undefined;
-                
-                routes.push({
-                  method: 'GET',
-                  path: routePath,
-                  file: entry.name,
-                  type,
-                  ...(pattern && { pattern })
-                });
-              }
-            }
-          }
-        }
-        
-        await scanDir(appDir);
-        
-        // Add root route if page.tsx exists in app root
-        const hasRootRoute = routes.some(r => r.path === '/');
-        if (!hasRootRoute && fs.existsSync(path.join(appDir, 'page.tsx'))) {
-          routes.push({
-            method: 'GET',
-            path: '/',
-            file: 'page.tsx',
-            type: 'static'
-          });
-        }
-        
-        return routes;
-      }
-
-      // Endpoint to get all routes
-      server.middlewares.use('/__bini_routes', async (_req: IncomingMessage, res: ServerResponse) => {
-        try {
-          const routes = await scanRoutes();
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ routes }));
-        } catch (error) {
-          res.statusCode = 500;
-          res.end(JSON.stringify({ routes: [], error: String(error) }));
-        }
-      });
-
-      // Endpoint to match a specific path
+      // Simple route match endpoint - uses router's built-in detection
       server.middlewares.use('/__bini_route_match', async (req: IncomingMessage, res: ServerResponse) => {
         try {
           const url = new URL(req.url || '', `http://${req.headers.host}`);
           const pathToMatch = url.searchParams.get('path') || '/';
           
-          const routes = await scanRoutes();
-          
-          // First try exact match (static routes)
-          const exactMatch = routes.find(r => r.type === 'static' && r.path === pathToMatch);
-          if (exactMatch) {
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ type: 'static', path: exactMatch.path }));
-            return;
-          }
-          
-          // Then try dynamic routes
-          for (const route of routes) {
-            if (route.type === 'dynamic' && route.pattern) {
-              const regex = new RegExp('^' + route.pattern + '$');
-              if (regex.test(pathToMatch)) {
-                res.setHeader('Content-Type', 'application/json');
-                res.end(JSON.stringify({ type: 'dynamic', path: route.path }));
-                return;
-              }
-            }
-          }
-          
-          // No match - return not_found
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ type: 'not_found' }));
+          res.end(JSON.stringify({ type: 'static', path: pathToMatch }));
         } catch (error) {
           res.statusCode = 500;
           res.end(JSON.stringify({ type: 'not_found' }));
