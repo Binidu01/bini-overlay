@@ -40,7 +40,6 @@ const BINI_PATH =
 // Icons
 const COPY_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>`;
 const CHECK_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-const CLOSE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 const PREV_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.24996 12.0608L8.71963 11.5304L5.89641 8.70722C5.50588 8.3167 5.50588 7.68353 5.89641 7.29301L8.71963 4.46978L9.24996 3.93945L10.3106 5.00011L9.78029 5.53044L7.31062 8.00011L9.78029 10.4698L10.3106 11.0001L9.24996 12.0608Z" fill="currentColor"/></svg>`;
 const NEXT_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.75011 3.93945L7.28044 4.46978L10.1037 7.29301C10.4942 7.68353 10.4942 8.3167 10.1037 8.70722L7.28044 11.5304L6.75011 12.0608L5.68945 11.0001L6.21978 10.4698L8.68945 8.00011L6.21978 5.53044L5.68945 5.00011L6.75011 3.93945Z" fill="currentColor"/></svg>`;
 const CHEVRON_RIGHT = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none"><path fill="#666" fill-rule="evenodd" clip-rule="evenodd" d="M5.50011 1.93945L6.03044 2.46978L10.8537 7.293C11.2442 7.68353 11.2442 8.31669 10.8537 8.70722L6.03044 13.5304L5.50011 14.0608L4.43945 13.0001L4.96978 12.4698L9.43945 8.00011L4.96978 3.53044L4.43945 3.00011L5.50011 1.93945Z"></path></svg>`;
@@ -335,13 +334,8 @@ function biniLoadingPlugin(): BiniPlugin {
 
   el.addEventListener("click", function(e) {
     e.stopPropagation();
-    if (el.classList.contains("has-errors")) {
-      if (window.__bini_show_overlay) {
-        window.__bini_show_overlay();
-      }
-    } else {
-      toggleMenu(e);
-    }
+    // Always toggle menu - even when there are errors
+    toggleMenu(e);
   });
   
   var routeInfoBtn = sr.getElementById("bini-route-info");
@@ -413,7 +407,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   const shikiTheme = options.shikiTheme || 'dark-plus';
 
   const theme = {
-    bg: '#0a0a0a',  // Solid opaque background
+    bg: '#0a0a0a',
     surface: '#0a0a0a',
     surfaceMuted: '#050505',
     border: 'rgba(255,255,255,0.08)',
@@ -472,6 +466,24 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     background: #3a3a3a;
     border-radius: 3px;
   }
+  .bini-code-scroll {
+    overflow-x: auto;
+  }
+  .bini-code-scroll::-webkit-scrollbar {
+    height: 8px;
+  }
+  .bini-code-scroll::-webkit-scrollbar-track {
+    background: ${theme.surfaceMuted};
+    border-radius: 4px;
+  }
+  .bini-code-scroll::-webkit-scrollbar-thumb {
+    background: #3a3a3a;
+    border-radius: 4px;
+  }
+  .bini-code-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #3a3a3a ${theme.surfaceMuted};
+  }
 </style>
 <div id="__bini_root" style="position:fixed;inset:0;z-index:2147483646;display:flex;flex-direction:column;align-items:center;padding-top:10vh;padding-left:15px;padding-right:15px;background:${theme.bg};font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;display:none;">
   <div id="__bini_backdrop" style="position:fixed;inset:0;z-index:-1;background:${theme.bg};"></div>
@@ -497,7 +509,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       </div>
       <div style="display:flex;gap:8px;">
         <button id="__bini_copy" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:${theme.chipBg};border:1px solid ${theme.border};border-radius:8px;cursor:pointer;color:${theme.text};transition:all 0.2s;">${COPY_ICON}</button>
-        <button id="__bini_close" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:${theme.chipBg};border:1px solid ${theme.border};border-radius:8px;cursor:pointer;color:${theme.text};transition:all 0.2s;">${CLOSE_ICON}</button>
       </div>
     </div>
     <div id="__bini_error_content" style="padding:24px;max-height:60vh;overflow-y:auto;font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;"></div>
@@ -518,7 +529,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   var _errorHandler = null;
   var _rejectionHandler = null;
   var _biniErrorHandler = null;
-  var _keydownHandler = null;
   
   function shortenPath(filePath) {
     if (!filePath) return '';
@@ -680,7 +690,11 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       if (err && err.file && err.line) {
         html += "<span style='color:#6b7280;'>" + escapeHtml(shortenPath(err.file)) + ":" + err.line + "</span>";
       }
-      html += "</div><div style='padding:12px 0;'>";
+      html += "</div>";
+      
+      html += "<div class='bini-code-scroll' style='overflow-x:auto;'>";
+      html += "<div style='display:inline-block;min-width:100%;padding:12px 0;'>";
+      
       for (var k = 0; k < codeLines.length; k++) {
         var cl = codeLines[k];
         var isErr = cl.includes('>>>');
@@ -689,12 +703,15 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
         var clNum = clNumMatch ? clNumMatch[1] : "";
         var clCode = clNumMatch ? cl.substring(cl.indexOf(':') + 1).trim() : cl;
         clCode = clCode.replace(/^>>>\\s*/, "");
+        
         html += "<div style='display:flex;padding:2px 0;" + clBg + "'>";
-        html += "<span style='min-width:55px;padding:0 12px;text-align:right;color:" + (isErr ? "#f87171" : "#6b7280") + ";user-select:none;font-size:11px;font-weight:500;'>" + clNum + "</span>";
-        html += "<div style='flex:1;padding:0 12px;white-space:pre;overflow-x:auto;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.5;'>" + highlightCode(clCode, lang) + "</div>";
+        html += "<span style='min-width:55px;padding:0 12px;text-align:right;color:" + (isErr ? "#f87171" : "#6b7280") + ";user-select:none;font-size:11px;font-weight:500;flex-shrink:0;'>" + clNum + "</span>";
+        html += "<div style='flex:1;padding:0 12px 0 0;white-space:pre;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.5;'>" + highlightCode(clCode, lang) + "</div>";
         html += "</div>";
       }
+      
       html += "</div></div>";
+      html += "</div>";
     }
 
     var frames = parseStack(stack);
@@ -757,7 +774,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       }, 2000);
     });
     
-    document.getElementById("__bini_close").addEventListener("click", hide);
     document.getElementById("__bini_prev").addEventListener("click", function() { 
       currentIndex = Math.max(0, currentIndex - 1); 
       render(); 
@@ -766,18 +782,8 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       currentIndex = Math.min(errors.length - 1, currentIndex + 1); 
       render(); 
     });
-
-    _keydownHandler = function(e) { if (e.key === "Escape") hide(); };
-    document.addEventListener("keydown", _keydownHandler);
   }
   
-  function hide() {
-    if (overlayRoot) overlayRoot.style.display = "none";
-    updateBadge();
-    // Dispatch clear errors event
-    window.dispatchEvent(new CustomEvent('__bini_clear_errors__'));
-  }
-
   function show() {
     if (overlayRoot) overlayRoot.style.display = "flex";
   }
@@ -785,7 +791,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   function render() {
     var err = errors[currentIndex];
     if (!err || !overlayRoot) {
-      if (overlayRoot && errors.length === 0) hide();
       return;
     }
     
@@ -872,7 +877,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     if (_errorHandler) { window.removeEventListener("error", _errorHandler); _errorHandler = null; }
     if (_rejectionHandler) { window.removeEventListener("unhandledrejection", _rejectionHandler); _rejectionHandler = null; }
     if (_biniErrorHandler) { window.removeEventListener("__bini_error__", _biniErrorHandler); _biniErrorHandler = null; }
-    if (_keydownHandler) { document.removeEventListener("keydown", _keydownHandler); _keydownHandler = null; }
   }
   
   function extractFileFromError(message, stack) {
@@ -1051,7 +1055,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       }
       currentIndex = Math.max(0, Math.min(currentIndex, errors.length - 1));
       if (errors.length === 0) {
-        if (overlayRoot) hide();
         updateBadge();
       } else {
         render();
@@ -1060,16 +1063,11 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     });
     
     import.meta.hot.on("vite:afterUpdate", function() {
-      // Clear runtime errors on successful HMR
-      errors = errors.filter(function(e) {
-        return e._type !== 'runtime';
-      });
-      currentIndex = Math.max(0, Math.min(currentIndex, errors.length - 1));
-      if (errors.length === 0) {
-        if (overlayRoot) hide();
-        updateBadge();
-        window.dispatchEvent(new CustomEvent('__bini_clear_errors__'));
-      }
+      // Clear ALL errors on successful HMR
+      errors = [];
+      currentIndex = 0;
+      updateBadge();
+      window.dispatchEvent(new CustomEvent('__bini_clear_errors__'));
     });
 
     import.meta.hot.dispose(function() {
@@ -1140,7 +1138,15 @@ function biniCodeContextPlugin(): BiniPlugin {
           }
           
           const line = parseInt(lineStr, 10);
-          let cleanPath = filePath.replace(/^vite:/, '').replace(/\\x00/g, '');
+          let cleanPath = decodeURIComponent(filePath)
+            .replace(/^vite:/, '')
+            .replace(/\\x00/g, '')
+            .replace(/\?.*$/, '');
+            
+          if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
+            cleanPath = new URL(cleanPath).pathname;
+          }
+          
           const fullPath = path.isAbsolute(cleanPath) ? cleanPath : path.join(process.cwd(), cleanPath);
 
           const cwd = process.cwd();
@@ -1149,6 +1155,13 @@ function biniCodeContextPlugin(): BiniPlugin {
             res.statusCode = 403;
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ error: 'Access denied' }));
+            return;
+          }
+          
+          if (!fs.existsSync(resolved)) {
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ lines: [] }));
             return;
           }
           
@@ -1168,7 +1181,8 @@ function biniCodeContextPlugin(): BiniPlugin {
           res.end(JSON.stringify({ lines: contextLines }));
         } catch {
           res.statusCode = 500;
-          res.end(JSON.stringify({ error: 'Failed to read file' }));
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ lines: [] }));
         }
       });
     },
