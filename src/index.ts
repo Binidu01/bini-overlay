@@ -488,13 +488,23 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   function shortenPath(filePath) {
     if (!filePath) return '';
     var path = filePath || '';
-    path = path.replace(/^vite:/, '');
+    // Clean the path
+    path = path.replace(/^vite:/, '').replace(/^vite\\\\x00/, '').replace(/\\x00/g, '');
     var match = path.match(/(?:src|app)[\\/\\\\].*$/);
     return match ? match[0] : path.split(/[\\/\\\\]/).slice(-2).join('/');
   }
   
   function stripNonAscii(str) {
     return (str || '').replace(/[^\\x20-\\x7E]/g, '').trim();
+  }
+  
+  function cleanErrorMessage(msg) {
+    // Remove vite:oxc and other prefixes
+    return (msg || '')
+      .replace(/vite:oxc\\s*/gi, '')
+      .replace(/vite:\\s*/gi, '')
+      .replace(/\\s*at\\s+vite:oxc.*$/gm, '')
+      .trim();
   }
 
   function parseStack(stack) {
@@ -503,6 +513,10 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     var lines = stack.split("\\n");
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].trim();
+      // Skip vite:oxc lines
+      if (line.includes('vite:oxc')) continue;
+      if (line.includes('vite:')) continue;
+      
       var match = line.match(/^at\\s+(?:(.+?)\\s+\\()?(.+?):(\\d+):(\\d+)\\)?$/);
       if (match) {
         var fnName = match[1] || null;
@@ -530,7 +544,8 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
 
   async function fetchCodeLines(filePath, lineNumber) {
     try {
-      var response = await fetch('/__bini_code_context?file=' + encodeURIComponent(filePath) + '&line=' + lineNumber);
+      var cleanPath = filePath.replace(/^vite:/, '').replace(/\\x00/g, '');
+      var response = await fetch('/__bini_code_context?file=' + encodeURIComponent(cleanPath) + '&line=' + lineNumber);
       if (response.ok) {
         var data = await response.json();
         return data.lines || [];
@@ -585,32 +600,36 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   
   function formatErrorMessage(message, codeLines, fileLang, stack, err) {
     var lang = fileLang || "javascript";
-    var lines = (message || '').split("\\n");
+    // Clean the message first
+    var cleanMsg = cleanErrorMessage(message);
+    var lines = cleanMsg.split("\\n");
     var html = "<div style='font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.6;'>";
     
     if (err && err.plugin) {
       var pluginName = err.plugin;
-      // Filter out "vite:" prefix
-      pluginName = pluginName.replace(/^vite:/, '');
-      html += "<div style='display:flex;align-items:center;gap:8px;margin-bottom:16px;'>";
-      html += "<span style='color:#6b7280;font-size:11px;'>" + escapeHtml(pluginName) + "</span>";
-      html += "</div>";
+      // Filter out "vite:" prefix completely
+      pluginName = pluginName.replace(/^vite:/, '').replace(/^vite\\\\x00/, '').replace(/\\x00/g, '');
+      if (pluginName && pluginName !== 'oxc') {
+        html += "<div style='display:flex;align-items:center;gap:8px;margin-bottom:16px;'>";
+        html += "<span style='color:#6b7280;font-size:11px;'>" + escapeHtml(pluginName) + "</span>";
+        html += "</div>";
+      }
     }
     
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
       
-      // Filter out lines containing "vite:oxc"
-      if (line.includes('vite:oxc')) continue;
+      // Skip empty lines or lines with only "vite:oxc"
+      if (!line || line === 'vite:oxc' || line.includes('vite:oxc')) continue;
       if (line.includes('NextJs') || line.includes('Turbopack')) continue;
       if (line.includes('╭─[') || line.includes('────╯')) continue;
 
       var errorMatch = line.match(/^\\[([^\\]]+)\\]\\s*(.+)$/);
       if (errorMatch) {
-        var cleanMsg = stripNonAscii(errorMatch[2]);
+        var cleanErrorMsg = stripNonAscii(errorMatch[2]);
         html += "<div style='background:rgba(248,113,113,0.08);padding:16px;border-radius:8px;margin:8px 0;'>";
         html += "<div style='color:#f87171;font-weight:600;margin-bottom:8px;'>" + escapeHtml(errorMatch[1]) + "</div>";
-        html += "<div style='color:#e4e4e7;font-size:14px;'>" + escapeHtml(cleanMsg) + "</div>";
+        html += "<div style='color:#e4e4e7;font-size:14px;'>" + escapeHtml(cleanErrorMsg) + "</div>";
         html += "</div>";
         continue;
       }
@@ -845,7 +864,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       var fileInfo = extractFileFromError(detail.message, detail.stack);
       var errorObj = {
         name: detail.name || "Runtime Error",
-        message: detail.message || "Unknown error",
+        message: cleanErrorMessage(detail.message || "Unknown error"),
         stack: detail.stack || "",
         componentStack: detail.componentStack || "",
         _type: detail._type || detail.type || "runtime",
@@ -879,7 +898,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     var fileInfo = extractFileFromError(e.message, (e.error && e.error.stack) || '');
     var errorObj = {
       name: (e.error && e.error.name) || "Runtime Error",
-      message: e.message,
+      message: cleanErrorMessage(e.message),
       stack: e.error && e.error.stack,
       file: e.filename || fileInfo.file || "",
       line: e.lineno || fileInfo.line || null,
@@ -910,7 +929,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     var fileInfo = extractFileFromError((r && r.message) || String(r), (r && r.stack) || '');
     var errorObj = {
       name: (r && r.name) || "Unhandled Rejection",
-      message: (r && r.message) || String(r),
+      message: cleanErrorMessage((r && r.message) || String(r)),
       stack: r && r.stack,
       file: fileInfo.file || "",
       line: fileInfo.line || null,
@@ -943,7 +962,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       if (err) {
         errorObj = {
           name: err.id ? "Build Error" : "Vite Error",
-          message: err.message || "Unknown build error",
+          message: cleanErrorMessage(err.message || "Unknown build error"),
           stack: err.stack || "",
           id: err.id || err.file || "",
           file: (err.loc && err.loc.file) || err.id || err.file || "",
@@ -977,7 +996,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       } else if (data && data.message) {
         errorObj = {
           name: "Build Error",
-          message: data.message,
+          message: cleanErrorMessage(data.message),
           stack: data.stack || "",
           file: "",
           line: null,
@@ -1079,7 +1098,7 @@ function biniCodeContextPlugin(): BiniPlugin {
           }
           
           const line = parseInt(lineStr, 10);
-          let cleanPath = filePath.replace(/^vite:/, '');
+          let cleanPath = filePath.replace(/^vite:/, '').replace(/\\x00/g, '');
           const fullPath = path.isAbsolute(cleanPath) ? cleanPath : path.join(process.cwd(), cleanPath);
 
           const cwd = process.cwd();

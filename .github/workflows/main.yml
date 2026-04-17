@@ -4,12 +4,13 @@ on:
   push:
     branches:
       - main
+      - alpha
   workflow_dispatch:
 
 permissions:
-  contents: write       # For GitHub release & tag creation
-  id-token: write       # REQUIRED for OIDC Trusted Publishing
-  packages: write       # Needed to publish to npm
+  contents: write
+  id-token: write
+  packages: write
 
 jobs:
   release:
@@ -42,25 +43,34 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Detected version: $VERSION"
 
-      - name: Create Git Tag (force if needed)
+      - name: Create Git Tag
         run: |
-          TAG="v${{ steps.pkg.outputs.version }}"
+          if [ "${{ github.ref_name }}" = "alpha" ]; then
+            TAG="v${{ steps.pkg.outputs.version }}-alpha"
+          else
+            TAG="v${{ steps.pkg.outputs.version }}"
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -f "$TAG"
           git push origin "$TAG" --force
-          git push origin main --force
+          git push origin ${{ github.ref_name }} --force
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v${{ steps.pkg.outputs.version }}"
-          name: "v${{ steps.pkg.outputs.version }}"
+          tag_name: ${{ github.ref_name == 'alpha' && format('v{0}-alpha', steps.pkg.outputs.version) || format('v{0}', steps.pkg.outputs.version) }}
+          name: ${{ github.ref_name == 'alpha' && format('v{0}-alpha', steps.pkg.outputs.version) || format('v{0}', steps.pkg.outputs.version) }}
           draft: false
-          prerelease: false
+          prerelease: ${{ github.ref_name == 'alpha' }}
           generate_release_notes: true
 
       - name: Publish to npm via OIDC
-        run: npm publish --access public
+        run: |
+          if [ "${{ github.ref_name }}" = "alpha" ]; then
+            npm publish --access public --tag alpha
+          else
+            npm publish --access public
+          fi
         env:
           NPM_CONFIG_PROVENANCE: true
