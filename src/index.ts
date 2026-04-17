@@ -98,7 +98,6 @@ function biniLoadingPlugin(): BiniPlugin {
     "  display: flex; align-items: center; justify-content: center;",
     "  z-index: 2147483647; border-radius: 50%;",
     "  background: #0a0a0a;",
-    "  backdrop-filter: blur(10px);",
     "  border: 1px solid rgba(255,255,255,0.1);",
     "  box-shadow: 0 4px 20px rgba(0,0,0,0.5);",
     "  pointer-events: auto; cursor: pointer;",
@@ -414,7 +413,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   const shikiTheme = options.shikiTheme || 'dark-plus';
 
   const theme = {
-    bg: 'rgba(0,0,0,0.45)',
+    bg: '#0a0a0a',  // Solid opaque background
     surface: '#0a0a0a',
     surfaceMuted: '#050505',
     border: 'rgba(255,255,255,0.08)',
@@ -438,7 +437,43 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
         if (!isDev(ctx)) return html;
 
         const overlayHtml = `
-<div id="__bini_root" style="position:fixed;inset:0;z-index:2147483646;display:flex;flex-direction:column;align-items:center;padding-top:10vh;padding-left:15px;padding-right:15px;background:${theme.bg};backdrop-filter:blur(12px);font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;display:none;">
+<style>
+  #__bini_error_content::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  #__bini_error_content::-webkit-scrollbar-track {
+    background: ${theme.surfaceMuted};
+    border-radius: 4px;
+  }
+  #__bini_error_content::-webkit-scrollbar-thumb {
+    background: #3a3a3a;
+    border-radius: 4px;
+    border: 1px solid ${theme.border};
+  }
+  #__bini_error_content::-webkit-scrollbar-thumb:hover {
+    background: #4a4a4a;
+  }
+  #__bini_error_content {
+    scrollbar-width: thin;
+    scrollbar-color: #3a3a3a ${theme.surfaceMuted};
+  }
+  #__bini_error_content pre {
+    overflow-x: auto;
+    white-space: pre;
+  }
+  #__bini_error_content pre::-webkit-scrollbar {
+    height: 6px;
+  }
+  #__bini_error_content pre::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  #__bini_error_content pre::-webkit-scrollbar-thumb {
+    background: #3a3a3a;
+    border-radius: 3px;
+  }
+</style>
+<div id="__bini_root" style="position:fixed;inset:0;z-index:2147483646;display:flex;flex-direction:column;align-items:center;padding-top:10vh;padding-left:15px;padding-right:15px;background:${theme.bg};font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;display:none;">
   <div id="__bini_backdrop" style="position:fixed;inset:0;z-index:-1;background:${theme.bg};"></div>
   <div style="position:relative;z-index:2;display:flex;width:100%;max-width:${theme.maxWidth};align-items:flex-end;justify-content:space-between;">
     <div style="display:flex;gap:8px;background:${theme.surface};padding:12px;border-radius:16px 16px 0 0;border:1px solid ${theme.border};border-bottom:none;">
@@ -454,7 +489,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       <span style="font-size:14px;font-weight:500;background:linear-gradient(135deg,#00CFFF,#0077FF);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Bini.js</span>
     </div>
   </div>
-  <div style="position:relative;z-index:10;display:flex;width:100%;max-width:${theme.maxWidth};flex-direction:column;overflow:hidden;border-radius:0 0 16px 16px;background:${theme.surface};backdrop-filter:blur(10px);color:${theme.text};box-shadow:0 8px 30px rgba(0,0,0,0.6);border:1px solid ${theme.border};border-top:none;">
+  <div style="position:relative;z-index:10;display:flex;width:100%;max-width:${theme.maxWidth};flex-direction:column;overflow:hidden;border-radius:0 0 16px 16px;background:${theme.surface};color:${theme.text};box-shadow:0 8px 30px rgba(0,0,0,0.6);border:1px solid ${theme.border};border-top:none;">
     <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid ${theme.border};background:${theme.surface};padding:12px 20px;">
       <div style="display:flex;align-items:center;gap:12px;flex:1;">
         <span id="__bini_heading" style="color:${theme.accent};font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;font-size:12px;background:rgba(248,113,113,0.12);padding:4px 12px;border-radius:20px;border:1px solid rgba(248,113,113,0.25);white-space:nowrap;"></span>
@@ -488,7 +523,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   function shortenPath(filePath) {
     if (!filePath) return '';
     var path = filePath || '';
-    // Clean the path
     path = path.replace(/^vite:/, '').replace(/^vite\\\\x00/, '').replace(/\\x00/g, '');
     var match = path.match(/(?:src|app)[\\/\\\\].*$/);
     return match ? match[0] : path.split(/[\\/\\\\]/).slice(-2).join('/');
@@ -499,7 +533,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   }
   
   function cleanErrorMessage(msg) {
-    // Remove vite:oxc and other prefixes
     return (msg || '')
       .replace(/vite:oxc\\s*/gi, '')
       .replace(/vite:\\s*/gi, '')
@@ -513,7 +546,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     var lines = stack.split("\\n");
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].trim();
-      // Skip vite:oxc lines
       if (line.includes('vite:oxc')) continue;
       if (line.includes('vite:')) continue;
       
@@ -600,14 +632,12 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   
   function formatErrorMessage(message, codeLines, fileLang, stack, err) {
     var lang = fileLang || "javascript";
-    // Clean the message first
     var cleanMsg = cleanErrorMessage(message);
     var lines = cleanMsg.split("\\n");
     var html = "<div style='font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.6;'>";
     
     if (err && err.plugin) {
       var pluginName = err.plugin;
-      // Filter out "vite:" prefix completely
       pluginName = pluginName.replace(/^vite:/, '').replace(/^vite\\\\x00/, '').replace(/\\x00/g, '');
       if (pluginName && pluginName !== 'oxc') {
         html += "<div style='display:flex;align-items:center;gap:8px;margin-bottom:16px;'>";
@@ -619,7 +649,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
       
-      // Skip empty lines or lines with only "vite:oxc"
       if (!line || line === 'vite:oxc' || line.includes('vite:oxc')) continue;
       if (line.includes('NextJs') || line.includes('Turbopack')) continue;
       if (line.includes('╭─[') || line.includes('────╯')) continue;
@@ -686,11 +715,10 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       html += "</div></div>";
     }
     
-    // Add component stack if available
     if (err && err.componentStack) {
       html += "<div style='margin-top:20px;'>";
       html += "<div style='font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;'>Component Stack</div>";
-      html += "<div style='background:#0a0a0a;border:1px solid rgba(255,255,255,0.08);border-radius:8px;overflow:hidden;padding:12px;'>";
+      html += "<div style='background:#0a0a0a;border:1px solid rgba(255,255,255,0.08);border-radius:8px;overflow:auto;padding:12px;max-height:200px;'>";
       html += "<pre style='margin:0;color:#9ca3af;font-size:11px;white-space:pre-wrap;word-break:break-all;'>" + escapeHtml(err.componentStack) + "</pre>";
       html += "</div></div>";
     }
@@ -746,6 +774,8 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   function hide() {
     if (overlayRoot) overlayRoot.style.display = "none";
     updateBadge();
+    // Dispatch clear errors event
+    window.dispatchEvent(new CustomEvent('__bini_clear_errors__'));
   }
 
   function show() {
@@ -845,7 +875,6 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     if (_keydownHandler) { document.removeEventListener("keydown", _keydownHandler); _keydownHandler = null; }
   }
   
-  // Extract file from module import errors
   function extractFileFromError(message, stack) {
     var moduleMatch = (message || '').match(/module ['"]([^'"]+)['"]/);
     if (moduleMatch) {
@@ -1027,6 +1056,19 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       } else {
         render();
         updateBadge();
+      }
+    });
+    
+    import.meta.hot.on("vite:afterUpdate", function() {
+      // Clear runtime errors on successful HMR
+      errors = errors.filter(function(e) {
+        return e._type !== 'runtime';
+      });
+      currentIndex = Math.max(0, Math.min(currentIndex, errors.length - 1));
+      if (errors.length === 0) {
+        if (overlayRoot) hide();
+        updateBadge();
+        window.dispatchEvent(new CustomEvent('__bini_clear_errors__'));
       }
     });
 
