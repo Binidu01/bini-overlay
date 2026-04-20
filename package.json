@@ -1,6 +1,6 @@
 {
   "name": "bini-overlay",
-  "version": "1.0.7-alpha.8",
+  "version": "1.0.7",
   "description": "Next.js-style error overlay and animated loading badge for Bini.js / Vite",
   "type": "module",
   "main": "dist/index.cjs",
@@ -59,6 +59,8 @@
     "vite": ">=7.0.0"
   },
   "devDependencies": {
+    "@babel/code-frame": "^7.29.0",
+    "@types/babel__code-frame": "^7.27.0",
     "@types/node": "^25.6.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.2",

@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  id-token: write
-  packages: write
+  contents: write        # needed to push tags and version commit
+  id-token: write        # needed for npm provenance (OIDC)
+  packages: write        # if you also publish to GitHub Packages
 
 jobs:
   release:
@@ -23,6 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -36,41 +37,56 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Determine version
-        id: pkg
+      - name: Configure Git
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Detected version: $VERSION"
-
-      - name: Create Git Tag
-        run: |
-          if [ "${{ github.ref_name }}" = "alpha" ]; then
-            TAG="v${{ steps.pkg.outputs.version }}-alpha"
-          else
-            TAG="v${{ steps.pkg.outputs.version }}"
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -f "$TAG"
-          git push origin "$TAG" --force
-          git push origin ${{ github.ref_name }} --force
+
+      - name: Determine and set version
+        id: version
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            # Bump patch version (e.g., 1.0.0 -> 1.0.1) and commit/tag
+            npm version patch -m "chore(release): %s [skip ci]"
+            VERSION=$(node -p "require('./package.json').version")
+            TAG_NAME="v${VERSION}"
+            NPM_TAG="latest"
+            PRERELEASE="false"
+          else
+            # Alpha branch: use current version + -alpha.<short sha>
+            BASE_VERSION=$(node -p "require('./package.json').version")
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            VERSION="${BASE_VERSION}-alpha.${SHORT_SHA}"
+            # Update package.json with the new alpha version
+            npm version "$VERSION" --no-git-tag-version
+            # Commit the version change manually
+            git add package.json
+            git commit -m "chore(release): ${VERSION} [skip ci]" || echo "No changes to commit"
+            TAG_NAME="v${VERSION}"
+            NPM_TAG="alpha"
+            PRERELEASE="true"
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "npm_tag=$NPM_TAG" >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+
+      - name: Push version commit and tag
+        run: |
+          git push origin ${{ github.ref_name }}
+          git push origin ${{ steps.version.outputs.tag_name }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name == 'alpha' && format('v{0}-alpha', steps.pkg.outputs.version) || format('v{0}', steps.pkg.outputs.version) }}
-          name: ${{ github.ref_name == 'alpha' && format('v{0}-alpha', steps.pkg.outputs.version) || format('v{0}', steps.pkg.outputs.version) }}
+          tag_name: ${{ steps.version.outputs.tag_name }}
+          name: ${{ steps.version.outputs.tag_name }}
           draft: false
-          prerelease: ${{ github.ref_name == 'alpha' }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
           generate_release_notes: true
 
       - name: Publish to npm via OIDC
-        run: |
-          if [ "${{ github.ref_name }}" = "alpha" ]; then
-            npm publish --access public --tag alpha
-          else
-            npm publish --access public
-          fi
+        run: npm publish --access public --tag ${{ steps.version.outputs.npm_tag }}
         env:
           NPM_CONFIG_PROVENANCE: true
