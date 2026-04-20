@@ -1,6 +1,6 @@
 {
   "name": "bini-overlay",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Next.js-style error overlay and animated loading badge for Bini.js / Vite",
   "type": "module",
   "main": "dist/index.cjs",
