@@ -930,6 +930,10 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
     if (overlayRoot) overlayRoot.style.display = "flex";
   }
   
+  function hide() {
+    if (overlayRoot) overlayRoot.style.display = "none";
+  }
+  
   function render() {
     var err = errors[currentIndex];
     if (!err || !overlayRoot) return;
@@ -1266,6 +1270,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       if (errors.length === 0) {
         filteredCount = 0;
         updateBadge();
+        hide();
       } else {
         render();
         updateBadge();
@@ -1278,6 +1283,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       currentIndex = 0;
       stackCollapsedState = {};
       updateBadge();
+      hide();
       window.dispatchEvent(new CustomEvent('__bini_clear_errors__'));
     });
 
