@@ -13,7 +13,23 @@ import type { IncomingMessage, ServerResponse } from 'http';
 // Types
 // ─────────────────────────────────────────────────────────────
 export interface BiniOverlayOptions {
-  shikiTheme?: string;
+  /**
+   * App directory to scan for routes when resolving the current page's
+   * route type (static/dynamic) in the loading badge menu.
+   * Must match the `appDir` passed to `biniroute()` if you customized it.
+   * Default: 'src/app'
+   */
+  appDir?: string;
+  /**
+   * Base path prefix for routes, if you customized it on `biniroute()`.
+   * Default: ''
+   */
+  basePath?: string;
+  /**
+   * Disable the animated loading badge (menu) while keeping the error overlay.
+   * Default: false
+   */
+  disableBadge?: boolean;
 }
 
 interface BiniPlugin extends Plugin {
@@ -66,10 +82,45 @@ function scriptTag(
   };
 }
 
+/**
+ * Guards the dev-only debug middlewares (`/__bini_code_context`,
+ * `/__bini_route_match`) against cross-origin requests. Without this, any
+ * page the developer's browser visits (or a DNS-rebinding attacker) could
+ * script a `fetch()` to these endpoints and read arbitrary files inside the
+ * project, or enumerate routes, since they otherwise require no auth.
+ *
+ * `Sec-Fetch-Site` is sent by all modern browsers on fetch/XHR and is the
+ * most reliable signal; we fall back to comparing `Origin` against `Host`
+ * for older clients that omit it. A request with neither header (e.g. a
+ * plain navigation, or non-browser tooling hitting the dev server directly
+ * on localhost) is allowed through, matching Vite's own dev-server checks.
+ */
+function isSameOriginRequest(req: IncomingMessage): boolean {
+  const secFetchSite = req.headers['sec-fetch-site'];
+  if (typeof secFetchSite === 'string') {
+    return secFetchSite === 'same-origin' || secFetchSite === 'none';
+  }
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === req.headers.host;
+  } catch {
+    return false;
+  }
+}
+
+function rejectCrossOrigin(res: ServerResponse): void {
+  res.statusCode = 403;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ error: 'Forbidden: cross-origin request' }));
+}
+
 // ─────────────────────────────────────────────────────────────
 // PLUGIN 1 — HMR loading badge with menu
 // ─────────────────────────────────────────────────────────────
-function biniLoadingPlugin(): BiniPlugin {
+function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
+  const isDisabled = options.disableBadge === true;
+  
   return {
     name: 'bini-overlay:loading',
     apply: 'serve',
@@ -80,6 +131,7 @@ function biniLoadingPlugin(): BiniPlugin {
         ctx: IndexHtmlTransformContext,
       ): string | HtmlTagDescriptor[] {
         if (!isDev(ctx)) return html;
+        if (isDisabled) return html; // Skip injecting the badge
 
         const js = `
 (function () {
@@ -251,6 +303,12 @@ function biniLoadingPlugin(): BiniPlugin {
   var menuEl = sr.getElementById("bini-menu");
   var menuVisible = false;
 
+  // Normalize path function
+  function normalizePath(path) {
+    if (!path) return '/';
+    return path.replace(/\\/+$/, '') || '/';
+  }
+
   window.__bini_set_error_count = function(count) {
     if (countEl) countEl.textContent = count;
     if (labelEl) labelEl.textContent = count === 1 ? "Issue" : "Issues";
@@ -352,43 +410,76 @@ function biniLoadingPlugin(): BiniPlugin {
   function updateMenuInfo() {
     var routeTypeEl = sr.getElementById("bini-route-type");
     var routeNameEl = sr.getElementById("bini-route-name");
-    
+
     if (routeNameEl) {
-      routeNameEl.textContent = window.location.pathname || '/';
+      var pathname = window.location.pathname || '/';
+      routeNameEl.textContent = normalizePath(pathname);
     }
-    
-    if (window.__bini_get_route_type) {
-      try {
-        var routeType = window.__bini_get_route_type();
-        if (routeTypeEl) {
-          if (routeType === 'dynamic') {
+
+    if (routeTypeEl) {
+      var pathname = window.location.pathname || '/';
+      var normalizedPath = normalizePath(pathname);
+      fetch("/__bini_route_match?path=" + encodeURIComponent(normalizedPath))
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          if (!data || !routeTypeEl) return;
+          if (data.type === 'dynamic') {
             routeTypeEl.textContent = 'Dynamic';
             routeTypeEl.style.color = '#fbbf24';
-          } else if (routeType === 'static') {
+          } else if (data.type === 'static') {
             routeTypeEl.textContent = 'Static';
             routeTypeEl.style.color = '#10b981';
           } else {
             routeTypeEl.textContent = 'Not Found';
             routeTypeEl.style.color = '#ef4444';
           }
-        }
-      } catch (e) {
-        if (routeTypeEl) {
-          routeTypeEl.textContent = 'Static';
-          routeTypeEl.style.color = '#10b981';
-        }
-      }
+        })
+        .catch(function () {});
     }
   }
   
   updateMenuInfo();
+
+  // Listen for client-side navigation events
+  if (window.history && window.history.pushState) {
+    var originalPushState = window.history.pushState;
+    var originalReplaceState = window.history.replaceState;
+    
+    window.history.pushState = function() {
+      originalPushState.apply(this, arguments);
+      setTimeout(updateMenuInfo, 100);
+    };
+    
+    window.history.replaceState = function() {
+      originalReplaceState.apply(this, arguments);
+      setTimeout(updateMenuInfo, 100);
+    };
+    
+    window.addEventListener('popstate', function() {
+      setTimeout(updateMenuInfo, 100);
+    });
+  }
+
+  // Also listen for route changes from frameworks like Next.js
+  var observer = new MutationObserver(function() {
+    var currentPath = window.location.pathname || '/';
+    var displayPath = sr.getElementById("bini-route-name");
+    if (displayPath && displayPath.textContent !== normalizePath(currentPath)) {
+      updateMenuInfo();
+    }
+  });
+  
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true
+  });
 
   if (import.meta.hot) {
     import.meta.hot.on("vite:beforeUpdate", start);
     import.meta.hot.on("vite:afterUpdate", function () { 
       ready = true; 
       if (animDone) idle();
-      updateMenuInfo();
+      setTimeout(updateMenuInfo, 200);
     });
   }
 })();
@@ -404,8 +495,8 @@ function biniLoadingPlugin(): BiniPlugin {
 // ─────────────────────────────────────────────────────────────
 // PLUGIN 2 — Error overlay
 // ─────────────────────────────────────────────────────────────
-function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
-  const shikiTheme = options.shikiTheme || 'dark-plus';
+function biniErrorOverlay(): BiniPlugin {
+  const shikiTheme = 'dark-plus';
 
   const theme = {
     bg: '#0a0a0a',
@@ -477,6 +568,15 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   .bini-code-scroll { 
     scrollbar-width: auto !important;
     scrollbar-color: #5a5a5a ${theme.surfaceMuted} !important;
+  }
+  /* Shiki wraps every highlighted line in its own <pre style="background-color:...">
+     using the theme's page background. Since we call it once per source line,
+     that shows up as a gray box behind each line — strip it so lines sit on
+     our own transparent container instead. */
+  .bini-code-scroll pre {
+    background: transparent !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   /* ── Call stack scroll ── */
@@ -722,37 +822,55 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
   
   function loadShiki() {
     if (shikiLoadPromise) return shikiLoadPromise;
-    shikiLoadPromise = new Promise(function(resolve) {
-      if (window.shiki && window.shiki.codeToHtml) {
-        shikiHighlighter = window.shiki;
-        resolve(window.shiki);
-        return;
+    // Shiki v1+ ships ESM only — there is no UMD/global build to script-tag.
+    // Load it as a real module from esm.sh instead. Major version is pinned
+    // (not "latest") so an upstream breaking change can't silently change
+    // behavior; bump this deliberately when you want a newer Shiki.
+    shikiLoadPromise = import("https://esm.sh/shiki@1").then(function (mod) {
+      if (mod && typeof mod.codeToHtml === "function") {
+        shikiHighlighter = mod;
+        return mod;
       }
-      var shikiScript = document.createElement("script");
-      shikiScript.src = "https://cdn.jsdelivr.net/npm/shiki@1.0.0/dist/index.min.js";
-      shikiScript.onload = function() {
-        if (window.shiki) {
-          shikiHighlighter = window.shiki;
-          resolve(window.shiki);
-        } else {
-          resolve(null);
-        }
-      };
-      shikiScript.onerror = function() { resolve(null); };
-      document.head.appendChild(shikiScript);
+      return null;
+    }).catch(function () {
+      return null;
     });
     return shikiLoadPromise;
   }
   
-  function highlightCode(code, lang) {
-    if (shikiHighlighter && shikiHighlighter.codeToHtml) {
-      try {
-        return shikiHighlighter.codeToHtml(code, { lang: lang || "javascript", theme: "${shikiTheme}" });
-      } catch(e) {
-        return "<pre style='margin:0;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;'><code>" + escapeHtml(code) + "</code></pre>";
-      }
-    }
+  function fallbackCodeHtml(code) {
     return "<pre style='margin:0;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;'><code>" + escapeHtml(code) + "</code></pre>";
+  }
+
+  function highlightCode(code, lang) {
+    // codeToHtml is async as of Shiki v1 — this always returns a Promise
+    // that resolves to an HTML string, or null on failure.
+    if (shikiHighlighter && shikiHighlighter.codeToHtml) {
+      return shikiHighlighter.codeToHtml(code, { lang: lang || "javascript", theme: "${shikiTheme}" }).catch(function () {
+        return null;
+      });
+    }
+    return Promise.resolve(null);
+  }
+
+  // Highlights every code line for an error ahead of render(), since
+  // highlightCode() is async. Populates err.highlightedLines, a parallel
+  // array to err.codeLines; formatErrorMessage() falls back to a plain
+  // escaped <pre> per-line if a given entry isn't ready or Shiki failed.
+  function prepareHighlights(err) {
+    if (!err || !err.codeLines || !err.codeLines.length) return Promise.resolve();
+    var lang = err.fileLang || "javascript";
+    return loadShiki().then(function () {
+      if (!shikiHighlighter) return;
+      var codes = err.codeLines.map(function (cl) {
+        var clNumMatch = cl.match(/(\\d+):/);
+        var clCode = clNumMatch ? cl.substring(cl.indexOf(':') + 1).trim() : cl;
+        return clCode.replace(/^>>>\\s*/, "");
+      });
+      return Promise.all(codes.map(function (code) { return highlightCode(code, lang); })).then(function (results) {
+        err.highlightedLines = results;
+      });
+    }).catch(function () {});
   }
 
   // SVG chevrons inlined as strings for the collapsible toggle
@@ -814,14 +932,14 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       for (var k = 0; k < codeLines.length; k++) {
         var cl = codeLines[k];
         var isErr = cl.includes('>>>');
-        var clBg = isErr ? "background:rgba(239,68,68,0.08);" : "";
         var clNumMatch = cl.match(/(\\d+):/);
         var clNum = clNumMatch ? clNumMatch[1] : "";
         var clCode = clNumMatch ? cl.substring(cl.indexOf(':') + 1).trim() : cl;
         clCode = clCode.replace(/^>>>\\s*/, "");
-        html += "<div style='display:flex;padding:2px 0;" + clBg + "'>";
+        var clHtml = (err && err.highlightedLines && err.highlightedLines[k]) ? err.highlightedLines[k] : fallbackCodeHtml(clCode);
+        html += "<div style='display:flex;padding:2px 0;" + (isErr ? "background:rgba(239,68,68,0.08);" : "") + "'>";
         html += "<span style='min-width:55px;padding:0 12px;text-align:right;color:" + (isErr ? "#f87171" : "#6b7280") + ";user-select:none;font-size:11px;font-weight:500;flex-shrink:0;'>" + clNum + "</span>";
-        html += "<div style='flex:1;padding:0 12px 0 0;white-space:pre;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.5;'>" + highlightCode(clCode, lang) + "</div>";
+        html += "<div style='flex:1;padding:0 12px 0 0;white-space:pre;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.5;'>" + clHtml + "</div>";
         html += "</div>";
       }
       html += "</div></div>";
@@ -1078,7 +1196,7 @@ function biniErrorOverlay(options: BiniOverlayOptions = {}): BiniPlugin {
       currentIndex = 0;
       stackCollapsedState = {};
       ensureOverlay();
-      loadShiki().then(function() { render(); });
+      prepareHighlights(err).then(function() { render(); });
       updateBadge();
       if (filteredCount > 0) {
         console.log('[Bini] Filtered ' + filteredCount + ' misleading errors total');
@@ -1344,6 +1462,11 @@ function biniCodeContextPlugin(): BiniPlugin {
     configureServer(server: ViteDevServer) {
       server.middlewares.use('/__bini_code_context', async (req: IncomingMessage, res: ServerResponse) => {
         try {
+          if (!isSameOriginRequest(req)) {
+            rejectCrossOrigin(res);
+            return;
+          }
+
           const url = new URL(req.url || '', `http://${req.headers.host}`);
           const filePath = url.searchParams.get('file');
           const lineStr = url.searchParams.get('line');
@@ -1409,7 +1532,10 @@ function biniCodeContextPlugin(): BiniPlugin {
 // ─────────────────────────────────────────────────────────────
 // PLUGIN 5 — Routes API for Bini Router
 // ─────────────────────────────────────────────────────────────
-function biniRoutesPlugin(): BiniPlugin {
+function biniRoutesPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
+  const appDir = path.join(process.cwd(), options.appDir ?? 'src/app');
+  const basePath = options.basePath ?? '';
+
   return {
     name: 'bini-overlay:routes',
     apply: 'serve',
@@ -1417,13 +1543,36 @@ function biniRoutesPlugin(): BiniPlugin {
     configureServer(server: ViteDevServer) {
       server.middlewares.use('/__bini_route_match', async (req: IncomingMessage, res: ServerResponse) => {
         try {
+          if (!isSameOriginRequest(req)) {
+            rejectCrossOrigin(res);
+            return;
+          }
+
           const url = new URL(req.url || '', `http://${req.headers.host}`);
-          const pathToMatch = url.searchParams.get('path') || '/';
+          let pathToMatch = url.searchParams.get('path') || '/';
           
+          // Normalize trailing slashes - remove all trailing slashes except for root
+          if (pathToMatch.length > 1) {
+            pathToMatch = pathToMatch.replace(/\/+$/, '');
+          }
+
+          // Reuse bini-router's own manifest scan + matcher — no route
+          // classification logic is re-derived here. Same source of truth
+          // that powers bini-router's generated <Routes> tree and its
+          // /api/* request dispatch.
+          const { generateRouteManifest, matchManifestRoute } = await import('bini-router');
+          const manifest = generateRouteManifest(appDir, basePath);
+          const result = matchManifestRoute(manifest, pathToMatch);
+
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ type: 'static', path: pathToMatch }));
+          res.end(JSON.stringify({
+            type: result.type,
+            path: pathToMatch,
+            routePath: result.routePath,
+          }));
         } catch (error) {
           res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({ type: 'not_found' }));
         }
       });
@@ -1437,9 +1586,9 @@ function biniRoutesPlugin(): BiniPlugin {
 export function biniOverlay(options: BiniOverlayOptions = {}): PluginOption[] {
   return [
     biniCodeContextPlugin(),
-    biniRoutesPlugin(),
+    biniRoutesPlugin(options),
     biniViteErrorInterceptPlugin(),
-    biniErrorOverlay(options),
-    biniLoadingPlugin(),
+    biniErrorOverlay(),
+    biniLoadingPlugin(options), // Pass options to loading plugin
   ];
 }

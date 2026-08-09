@@ -22,7 +22,6 @@ A Next.js-style error overlay and animated loading badge for **Bini.js** project
 - [States](#states)
 - [HMR Events](#hmr-events)
 - [Error Panel](#error-panel)
-- [Options](#options)
 - [Requirements](#requirements)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
@@ -39,8 +38,9 @@ A Next.js-style error overlay and animated loading badge for **Bini.js** project
 - 🔄 **HMR integration** — reacts to `vite:error`, `vite:beforeUpdate`, and `vite:afterUpdate`
 - 🧭 **Multi-error navigation** — prev/next arrows when multiple errors are queued
 - 🎨 **Bini.js branding** — official gradient logo and `Bini.js` label in the toolbar
-- 🎨 **Shiki syntax highlighting** — code frames highlighted via Shiki (loaded from CDN at runtime)
+- 🎨 **Shiki syntax highlighting** — code frames highlighted with the `dark-plus` theme via Shiki, loaded as an ES module from CDN at runtime
 - 🔒 **Dev only** — never appears in production builds
+- 🛡️ **Same-origin protected debug endpoints** — the code-frame and route-lookup APIs the overlay talks to reject cross-origin requests
 - 🛡️ **Suppresses default Vite overlay** — replaces the built-in `vite-error-overlay` custom element
 - 🧹 **Auto-clears** — overlay automatically hides when errors are fixed (no manual refresh needed)
 
@@ -74,23 +74,7 @@ export default defineConfig({
 })
 ```
 
-### With Options
-
-```ts
-// vite.config.ts
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { biniOverlay } from 'bini-overlay'
-
-export default defineConfig({
-  plugins: [
-    react(),
-    ...biniOverlay({
-      shikiTheme: 'dark-plus' // optional — any valid Shiki theme
-    })
-  ]
-})
-```
+`biniOverlay()` takes an optional config object for the loading badge — see [Options](#options) below. Code-frame syntax highlighting itself isn't configurable; it always renders with the `dark-plus` Shiki theme.
 
 ---
 
@@ -135,7 +119,7 @@ When an error occurs, a full-screen overlay opens showing:
 |---------|-------------|
 | **Error Type** | Runtime Error / Parse Error / Build Error / Type Error / Unhandled Rejection |
 | **File Info** | Detected file path with line number |
-| **Code Frame** | Surrounding lines fetched from disk with highlighted error line |
+| **Code Frame** | Surrounding lines fetched from disk, Shiki-highlighted, with the error line called out |
 | **Call Stack** | Collapsible stack trace with internal and `node_modules` frames filtered |
 | **Copy Button** | Copies full error message, file, code context, and stack to clipboard |
 | **Navigation** | Prev/Next arrows when multiple errors are queued |
@@ -148,7 +132,7 @@ When an error occurs, a full-screen overlay opens showing:
     13:   return <h1>Hello, {name}!</h1>
 ```
 
-The error line is highlighted with `>>>` prefix and a red background.
+The error line is marked with a `>>>` prefix and a subtle red row highlight; all other lines sit flat with no per-line background.
 
 ---
 
@@ -157,24 +141,28 @@ The error line is highlighted with `>>>` prefix and a red background.
 ```ts
 interface BiniOverlayOptions {
   /**
-   * Shiki theme to use for code frame highlighting.
-   * Any valid Shiki theme name accepted.
-   * 
-   * @see https://shiki.matsu.io/themes
-   * @default 'dark-plus'
+   * App directory to scan for routes when resolving the current page's
+   * route type (static/dynamic) in the loading badge menu.
+   * Must match the `appDir` passed to `biniroute()` if you customized it.
+   * @default 'src/app'
    */
-  shikiTheme?: string;
+  appDir?: string;
+
+  /**
+   * Base path prefix for routes, if you customized it on `biniroute()`.
+   * @default ''
+   */
+  basePath?: string;
+
+  /**
+   * Disable the animated loading badge (menu) while keeping the error overlay.
+   * @default false
+   */
+  disableBadge?: boolean;
 }
 ```
 
-### Example Themes
-
-- `'dark-plus'` — default, dark background with vibrant syntax
-- `'github-dark'` — matches GitHub's dark mode
-- `'one-dark-pro'` — popular Atom-inspired theme
-- `'material-theme'` — clean Material Design colors
-- `'dracula'` — dark purple-based theme
-- `'solarized-dark'` — warm, muted dark theme
+There's no theme option — code frames always render with Shiki's `dark-plus` theme.
 
 ---
 
@@ -195,9 +183,13 @@ interface BiniOverlayOptions {
 - Verify the plugin is installed as a dev dependency
 
 ### Shiki highlighting not working
-- The overlay loads Shiki from CDN at runtime
+- The overlay loads Shiki as an ES module from `esm.sh` at runtime
 - An internet connection is required for first load
-- Syntax highlighting falls back to plain text if Shiki fails to load
+- Syntax highlighting falls back to plain, unhighlighted text per line if Shiki fails to load — the overlay still works, just without colors
+
+### `403 Forbidden` from the overlay's internal endpoints
+- The code-frame and route-lookup endpoints (`/__bini_code_context`, `/__bini_route_match`) only accept same-origin requests, to stop other pages or scripts from reading files off your machine through the dev server
+- If you're proxying the dev server through a different origin, requests to these endpoints from the browser will be rejected — access the dev server directly instead
 
 ### Badge stays in loading state
 - This indicates an HMR update is in progress
