@@ -21,11 +21,6 @@ export interface BiniOverlayOptions {
    */
   appDir?: string;
   /**
-   * Base path prefix for routes, if you customized it on `biniroute()`.
-   * Default: ''
-   */
-  basePath?: string;
-  /**
    * Disable the animated loading badge (menu) while keeping the error overlay.
    * Default: false
    */
@@ -410,28 +405,37 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
   function updateMenuInfo() {
     var routeTypeEl = sr.getElementById("bini-route-type");
     var routeNameEl = sr.getElementById("bini-route-name");
+    var pathname = window.location.pathname || '/';
+    var normalizedPath = normalizePath(pathname);
 
     if (routeNameEl) {
-      var pathname = window.location.pathname || '/';
-      routeNameEl.textContent = normalizePath(pathname);
+      // Placeholder shown immediately — this still has any app basePath
+      // prefix (e.g. "/my-app/dashboard"). It's corrected below using the
+      // server's basePath-stripped path, which is bini-router's own
+      // source of truth (see the /__bini_route_match middleware), rather
+      // than re-deriving basePath-stripping logic here on the client.
+      routeNameEl.textContent = normalizedPath;
     }
 
-    if (routeTypeEl) {
-      var pathname = window.location.pathname || '/';
-      var normalizedPath = normalizePath(pathname);
+    if (routeTypeEl || routeNameEl) {
       fetch("/__bini_route_match?path=" + encodeURIComponent(normalizedPath))
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (data) {
-          if (!data || !routeTypeEl) return;
-          if (data.type === 'dynamic') {
-            routeTypeEl.textContent = 'Dynamic';
-            routeTypeEl.style.color = '#fbbf24';
-          } else if (data.type === 'static') {
-            routeTypeEl.textContent = 'Static';
-            routeTypeEl.style.color = '#10b981';
-          } else {
-            routeTypeEl.textContent = 'Not Found';
-            routeTypeEl.style.color = '#ef4444';
+          if (!data) return;
+          if (routeNameEl && data.path) {
+            routeNameEl.textContent = normalizePath(data.path);
+          }
+          if (routeTypeEl) {
+            if (data.type === 'dynamic') {
+              routeTypeEl.textContent = 'Dynamic';
+              routeTypeEl.style.color = '#fbbf24';
+            } else if (data.type === 'static') {
+              routeTypeEl.textContent = 'Static';
+              routeTypeEl.style.color = '#10b981';
+            } else {
+              routeTypeEl.textContent = 'Not Found';
+              routeTypeEl.style.color = '#ef4444';
+            }
           }
         })
         .catch(function () {});
@@ -1534,13 +1538,21 @@ function biniCodeContextPlugin(): BiniPlugin {
 // ─────────────────────────────────────────────────────────────
 function biniRoutesPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
   const appDir = path.join(process.cwd(), options.appDir ?? 'src/app');
-  const basePath = options.basePath ?? '';
 
   return {
     name: 'bini-overlay:routes',
     apply: 'serve',
 
     configureServer(server: ViteDevServer) {
+      // Vite's own resolved base — the single source of truth bini-router's
+      // <BrowserRouter basename> is derived from. bini-router's
+      // generateRouteManifest() has no basePath/base parameter of its own —
+      // it always returns bare, unprefixed route paths (e.g. "/dashboard",
+      // never "/my-app/dashboard") — so the base has to be stripped from the
+      // incoming request path here instead of pushed into the manifest call.
+      const base = server.config.base || '/';
+      const baseNoSlash = base.endsWith('/') ? base.slice(0, -1) : base;
+
       server.middlewares.use('/__bini_route_match', async (req: IncomingMessage, res: ServerResponse) => {
         try {
           if (!isSameOriginRequest(req)) {
@@ -1550,7 +1562,19 @@ function biniRoutesPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
 
           const url = new URL(req.url || '', `http://${req.headers.host}`);
           let pathToMatch = url.searchParams.get('path') || '/';
-          
+
+          // Strip the base path the browser actually sent (e.g.
+          // "/my-app/dashboard", since that's what window.location.pathname
+          // reports once the app is mounted under a sub-path) down to the
+          // bare route path bini-router's manifest uses ("/dashboard").
+          if (baseNoSlash) {
+            if (pathToMatch === baseNoSlash) {
+              pathToMatch = '/';
+            } else if (pathToMatch.startsWith(baseNoSlash + '/')) {
+              pathToMatch = pathToMatch.slice(baseNoSlash.length) || '/';
+            }
+          }
+
           // Normalize trailing slashes - remove all trailing slashes except for root
           if (pathToMatch.length > 1) {
             pathToMatch = pathToMatch.replace(/\/+$/, '');
@@ -1561,7 +1585,7 @@ function biniRoutesPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
           // that powers bini-router's generated <Routes> tree and its
           // /api/* request dispatch.
           const { generateRouteManifest, matchManifestRoute } = await import('bini-router');
-          const manifest = generateRouteManifest(appDir, basePath);
+          const manifest = generateRouteManifest(appDir); // bini-router has no basePath param
           const result = matchManifestRoute(manifest, pathToMatch);
 
           res.setHeader('Content-Type', 'application/json');
