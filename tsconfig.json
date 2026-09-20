@@ -8,12 +8,6 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": false,
 
-    "declaration": true,
-    "declarationMap": true,
-    "emitDeclarationOnly": false,
-    "outDir": "./dist",
-    "rootDir": "./src",
-
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,

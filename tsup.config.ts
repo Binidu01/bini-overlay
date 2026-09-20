@@ -9,7 +9,7 @@ export default defineConfig({
   splitting  : false,
   treeshake  : true,
   target     : 'es2022',
-  external   : ['vite', 'bini-router', '@jridgewell/trace-mapping'],
+  external   : ['vite'],
   esbuildOptions(opts) {
     opts.platform = 'node';
   },
