@@ -2,45 +2,44 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
 
-    // 🔥 Critical for modern bundlers (Vite/Rollup)
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "allowImportingTsExtensions": false,
 
-    // 🔥 Output
     "declaration": true,
     "declarationMap": true,
     "emitDeclarationOnly": false,
     "outDir": "./dist",
     "rootDir": "./src",
 
-    // 🔥 Strictness (you were going soft here)
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,
 
-    // 🔥 Clean code hygiene
     "noUnusedLocals": true,
     "noUnusedParameters": true,
 
-    // 🔥 Interop (safe defaults)
     "esModuleInterop": true,
     "verbatimModuleSyntax": true,
 
-    // 🔥 Required for Vite + TS correctness
     "isolatedModules": true,
 
-    // 🔥 Stability
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 
-    // 🔥 Debugging
-    "sourceMap": true
+    "sourceMap": true,
+
+    "types": ["node"]
   },
 
   "include": ["src"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ]
 }
