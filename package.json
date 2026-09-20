@@ -17,15 +17,18 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "sideEffects": false,
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "pack": "npm run build && npm pack",
+    "release": "npm run build && npm publish"
   },
   "keywords": [
     "vite",
@@ -33,6 +36,7 @@
     "bini",
     "bini-js",
     "bini.js",
+    "bini-router",
     "overlay",
     "error-overlay",
     "hmr",
@@ -47,7 +51,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Binidu01/bini-overlay.git"
+    "url": "git+https://github.com/Binidu01/bini-overlay.git"
   },
   "bugs": {
     "url": "https://github.com/Binidu01/bini-overlay/issues"
@@ -60,7 +64,7 @@
     "@jridgewell/trace-mapping": "^0.3.25"
   },
   "peerDependencies": {
-    "vite": ">=7.0.0",
+    "vite": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "bini-router": ">=2.0.0"
   },
   "peerDependenciesMeta": {
@@ -69,10 +73,10 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^25.6.0",
+    "@types/node": "^22.10.0",
     "tsup": "^8.5.1",
-    "typescript": "^6.0.2",
-    "vite": "^8.0.8"
+    "typescript": "^5.7.0",
+    "vite": "^7.0.0"
   },
   "publishConfig": {
     "access": "public"
