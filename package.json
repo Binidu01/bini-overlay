@@ -1,6 +1,6 @@
 {
   "name": "bini-overlay",
-  "version": "2.0.4",
+  "version": "2.1.0",
   "description": "Next.js-style error overlay and animated loading badge for Bini.js",
   "type": "module",
   "main": "dist/index.cjs",
@@ -11,7 +11,8 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
@@ -55,9 +56,17 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "dependencies": {
+    "@jridgewell/trace-mapping": "^0.3.25"
+  },
   "peerDependencies": {
     "vite": ">=7.0.0",
-    "bini-router": "2.0.5"
+    "bini-router": ">=2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "bini-router": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
