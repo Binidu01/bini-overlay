@@ -8,7 +8,7 @@
   <a href="https://www.npmjs.com/package/bini-overlay"><img src="https://img.shields.io/npm/v/bini-overlay?style=flat-square&color=0077FF&label=npm" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/bini-overlay"><img src="https://img.shields.io/npm/dm/bini-overlay?style=flat-square&color=00CFFF&label=downloads" alt="npm downloads" /></a>
   <a href="https://github.com/Binidu01/bini-overlay/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/bini-overlay?style=flat-square&color=0077FF" alt="license" /></a>
-  <a href="https://vitejs.dev"><img src="https://img.shields.io/badge/vite-7%2B%20%7C%208%2B-646cff?style=flat-square&logo=vite&logoColor=white" alt="vite" /></a>
+  <a href="https://vitejs.dev"><img src="https://img.shields.io/badge/vite-8%2B-646cff?style=flat-square&logo=vite&logoColor=white" alt="vite" /></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen?style=flat-square&logo=node.js&logoColor=white" alt="node" /></a>
   <img src="https://img.shields.io/badge/dev_only-never_in_prod-22c55e?style=flat-square" alt="dev only" />
 </p>
@@ -91,7 +91,7 @@ pnpm add bini-overlay -D
 yarn add bini-overlay -D
 ```
 
-`vite` (`>= 7`) is a required peer dependency. To enable route type detection and the Route Info inspector, also install the optional peer dependency [`bini-router`](https://www.npmjs.com/package/bini-router) (`>= 2.0.0`); Bini.js projects already include it.
+`vite` (`>= 8`) is a required peer dependency. Vite 7 and earlier are not supported. To enable route type detection and the Route Info inspector, also install the optional peer dependency [`bini-router`](https://www.npmjs.com/package/bini-router) (`>= 2.0.0`); Bini.js projects already include it.
 
 ---
 
@@ -333,13 +333,13 @@ The overlay exposes file-reading and process-launching endpoints, so they are lo
 | | Version |
 |---|---|
 | Node.js | `>= 18.0.0` |
-| Vite | `>= 7.0.0` |
+| Vite | `>= 8.0.0` (Rolldown-based) |
 
 **Dependencies**
 
 | Package | Type | Purpose |
 |---------|------|---------|
-| `vite` (`>= 7.0.0`) | Peer, required | Host build tool and dev server |
+| `vite` (`>= 8.0.0`) | Peer, required | Host build tool and dev server. Vite 7 and earlier are not supported. |
 | [`bini-router`](https://www.npmjs.com/package/bini-router) (`>= 2.0.0`) | Peer, **optional** | Route type and Route Info in the badge menu. Without it, everything else still works. |
 | `@jridgewell/trace-mapping` | Dependency (installed automatically) | Resolves source-mapped stack frames |
 
