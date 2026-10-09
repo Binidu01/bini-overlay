@@ -20,13 +20,13 @@
 ## Table of Contents
 
 - [Overview](#overview)
-- [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Options](#options)
 - [The Badge](#the-badge)
 - [The Error Panel](#the-error-panel)
 - [Reporting Errors From Your App](#reporting-errors-from-your-app)
+- [Events](#events)
 - [Dev Server Endpoints](#dev-server-endpoints)
 - [Security](#security)
 - [Architecture](#architecture)
@@ -42,42 +42,13 @@
 
 `bini-overlay` is a Vite plugin bundle that gives Bini.js projects a polished development experience:
 
-- A floating **badge** that animates during HMR updates, shows the current route type, and opens a preferences menu.
-- A **red issue pill** that replaces the badge when something breaks.
-- A full-screen **error panel** with a syntax-highlighted code frame, source-mapped call stack, and one-click "open in editor".
-- It replaces Vite's default `vite-error-overlay`, so there is a single, consistent error UI.
+- A floating **badge** that animates during HMR updates, shows the current route type, and opens a menu with a route inspector and preferences.
+- A **red issue pill** that replaces the idle badge when something breaks.
+- A full-screen **error panel** with a syntax-highlighted code frame, a source-mapped call stack, and one-click "open in editor".
+- A hidden replacement for Vite's `vite-error-overlay` element, so there is a single, consistent error UI.
+- **Locally served fonts** (Inter and Geist) for the overlay UI, so it works without network access to a font CDN.
 
-Everything is registered with `apply: 'serve'`. **Nothing is injected into production builds.**
-
----
-
-## Features
-
-### Status badge
-- Animated SVG stroke-drawing logo on page load and on every HMR update.
-- Renders inside a **Shadow DOM**, so it never collides with your app's CSS.
-- Morphs into a red `1 Issue` / `N Issues` pill when errors are present.
-- Menu with live **route type** (Static / Dynamic / Not Found), bundler info, and a **Route Info** inspector.
-- Persistent **preferences**: theme, corner position, size, and a recordable visibility shortcut.
-- Route type updates automatically on client-side navigation (`pushState`, `replaceState`, `popstate`).
-
-### Error panel
-- Captures **runtime errors**, **unhandled promise rejections**, **Vite build/transform errors**, and errors reported by your own error boundaries.
-- Errors are labelled by type: Runtime Error, Parse Error, Build Error, Type Error, or Unhandled Rejection.
-- **Code frame** read from disk around the failing line, highlighted with [Shiki](https://shiki.style) (`dark-plus`).
-- **Source-mapped call stack**: frames are resolved back to your original source when a source map is available.
-- Stack frames are split into **application frames** and collapsible **framework frames** (Vite, Rolldown, Node internals).
-- **Click any frame to open it in your editor** at the exact line.
-- **Component stack** section for React error-boundary errors.
-- **Multi-error navigation** with prev/next controls and an `n / total` counter.
-- **Copy** button that copies the message, file, component stack, and stack trace.
-- **Smart de-duplication and prioritisation**: duplicate errors are merged, real compile errors sort first, and misleading cascade errors (for example `Failed to fetch dynamically imported module`) are hidden while a real error exists.
-- **Auto-clears** when HMR delivers a fix, with no manual refresh.
-- Falls back gracefully to plain, unhighlighted text if Shiki cannot load.
-
-### Developer safety
-- All debug endpoints are **same-origin only**.
-- File access is **confined to the project root**.
+Every plugin is registered with `apply: 'serve'`, and every HTML transform also checks that a dev server is running. **Nothing is injected into production builds.**
 
 ---
 
@@ -91,7 +62,10 @@ pnpm add bini-overlay -D
 yarn add bini-overlay -D
 ```
 
-`vite` (`>= 8`) is a required peer dependency. Vite 7 and earlier are not supported. To enable route type detection and the Route Info inspector, also install the optional peer dependency [`bini-router`](https://www.npmjs.com/package/bini-router) (`>= 2.0.0`); Bini.js projects already include it.
+You also need:
+
+- `vite` `>= 8` (Rolldown-based). Vite 7 and earlier are not supported.
+- [`bini-router`](https://www.npmjs.com/package/bini-router) `>= 2.0.0`. It is a peer dependency, not bundled into `bini-overlay`. The plugin imports it when the dev server starts and uses it for the route type and Route Info. Bini.js projects already include it. npm 7+ installs missing peer dependencies automatically; pnpm and Yarn warn when one is missing.
 
 ---
 
@@ -106,63 +80,53 @@ import { biniOverlay } from 'bini-overlay'
 export default defineConfig({
   plugins: [
     react(),
-    ...biniOverlay(), // note the spread: it returns an array of plugins
+    biniOverlay(), // returns an array of plugins
   ],
 })
 ```
 
-`biniOverlay()` returns an **array** of plugins, so it must be spread into `plugins`.
+`biniOverlay()` returns a `PluginOption[]`. Vite flattens nested plugin arrays, so add it to `plugins` as-is, with no spread.
 
 ---
 
 ## Options
 
 ```ts
-interface BiniOverlayOptions {
+export interface BiniOverlayOptions {
   /**
-   * App directory scanned for routes. Used to resolve the current page's
-   * route type and to power the Route Info inspector.
-   * Must match the `appDir` you pass to `biniroute()` if customised.
-   * @default 'src/app'
-   */
-  appDir?: string
-
-  /**
-   * Hide the loading badge and its menu while keeping the error overlay.
+   * Skip the loading badge and its menu while keeping the error overlay.
    * @default false
    */
   disableBadge?: boolean
-
-  /**
-   * Editor binary used by "open in editor". When omitted, the first of
-   * `code`, `cursor`, `zed`, `subl`, `webstorm` found on PATH is used.
-   */
-  editor?: string
 }
 ```
 
-**Example**
+`disableBadge` is the only option.
 
 ```ts
-biniOverlay({
-  appDir: 'src/app',
-  editor: 'cursor',
-})
+biniOverlay({ disableBadge: true })
 ```
 
-The Vite `base` config is picked up automatically for route matching, so no separate base-path option is needed. Code-frame highlighting always uses Shiki's `dark-plus` theme and is not configurable.
+Notes:
+
+- The route directory is fixed to `src/app` (relative to the working directory) and is not configurable.
+- The Vite `base` config is picked up automatically when matching routes and when building font URLs.
+- The code-frame theme follows the overlay theme preference: Shiki's `dark-plus` in dark mode and `light-plus` in light mode.
+- The package exports `biniOverlay` and the `BiniOverlayOptions` type.
 
 ---
 
 ## The Badge
 
-By default the badge sits in the **bottom-left** corner.
+The badge is a Shadow DOM widget (so it never collides with your app's CSS) injected as a module script just before `</body>`. By default it sits in the **bottom-left** corner, 20px from the edges.
 
 | State | Appearance | Behaviour |
 |-------|------------|-----------|
-| **Loading** | Logo draws itself with a stroke animation | Runs on page load and on each HMR update |
+| **Loading** | Logo draws itself with a stroke animation | Runs on page load and on each HMR update (`vite:beforeUpdate`) |
 | **Idle** | Filled gradient logo | Default state when there are no errors |
 | **Error** | Red pill showing `1 Issue` / `N Issues` | Click the count to open the error panel, or the logo to open the menu |
+
+With `disableBadge: true` the badge is not injected at all. The error panel still works, but the red issue pill is not shown.
 
 ### Menu
 
@@ -170,15 +134,22 @@ Click the badge to open the menu.
 
 | Item | Description |
 |------|-------------|
-| **Issues** | Shown only when errors exist. Reopens the error panel. |
-| **Route** | Current route type: `Static`, `Dynamic`, or `Not Found`. |
-| **Bundler** | Displays the active bundler (Rolldown). |
-| **Route Info** | Opens the route inspector (see below). |
+| **Issues** | Shown only when errors exist, with a red count. Click to reopen the error panel. |
+| **Route** | Current route type: `Static` (green), `Dynamic` (amber), or `Not Found` (red). |
+| **Bundler** | Fixed label: `Rolldown`. |
+| **Route Info** | Opens the route inspector. |
 | **Preferences** | Opens the preferences popover. |
+
+The route type is fetched from `/__bini_route_match` on page load, on client-side navigation (`pushState`, `replaceState`, `popstate`), and after each HMR update.
 
 ### Route Info
 
-Shows the matched route path as a tree, including the layout files and page file that render it. Dynamic (`:param`) and catch-all (`*`) segments are tagged with a chip. Unmatched URLs show a "renders your 404 page" message. Requires [`bini-router`](https://www.npmjs.com/package/bini-router) `>= 2.0.0`.
+Shows the current URL path and the matched route as a tree:
+
+- The first row, `app`, lists the **file names** of the matching layouts and the page file as chips.
+- Below it is one row per segment of the matched route pattern, indented by depth. A dynamic route appears as its pattern (for example `:slug`), not the URL value.
+- Dynamic (`:param`) segments get a `dynamic` chip and catch-all (`*`) segments get a `catch-all` chip.
+- URLs with no matching route show: "No matching route for `/path`. This URL renders your 404 page."
 
 ### Preferences
 
@@ -186,62 +157,129 @@ Shows the matched route path as a tree, including the layout files and page file
 |---------|---------|---------|
 | **Theme** | System, Light, Dark | System |
 | **Position** | Bottom Left, Bottom Right, Top Left, Top Right | Bottom Left |
-| **Size** | Small, Medium, Large | Medium |
-| **Hide for this session** | Hides the badge until the tab is closed | Off |
-| **Shortcut** | Record any key combination to toggle visibility | `Alt+B` |
+| **Size** | Small (36px), Medium (48px), Large (56px) | Medium |
+| **Hide for this session** | Hides the badge and its menus until the tab is closed | Off |
+| **Shortcut** | Record any key combination (modifiers: Alt, Ctrl, Meta, Shift); press `Esc` to cancel recording | `Alt+B` |
 
-Preferences are stored in `localStorage` under `bini-overlay:prefs`. The session-hide flag lives in `sessionStorage` and is cleared when the tab closes.
+- Preferences (`theme`, `position`, `size`, `shortcut`) are stored in `localStorage` under `bini-overlay:prefs`.
+- The session-hide flag is stored in `sessionStorage` under `bini-overlay:hide-session`.
+- The shortcut **toggles** the badge's visibility.
+- The theme preference also drives the error panel and is broadcast through the `__bini_theme__` window event.
+- Hiding affects only the badge and its menus. The error panel still opens when an error occurs.
 
 ---
 
 ## The Error Panel
 
-When an error occurs, the panel opens automatically.
+The error script is injected at the start of `<head>` and creates the panel lazily on the first error. It is rendered as regular DOM (element id `__bini_ov__`), not inside the badge's Shadow DOM.
+
+### Layout
 
 | Section | Description |
 |---------|-------------|
-| **Header** | Error type, `file:line` chip, copy button, and close button |
-| **Message** | Cleaned error message, with the originating plugin shown for build errors |
-| **Code Frame** | Five lines of context read from disk, with the failing line marked by `>>>` and a red row highlight |
-| **Call Stack** | Application frames first, framework frames collapsed behind a "N framework frames hidden" toggle |
+| **Top tab (left)** | Previous / next buttons with an `n / total` counter |
+| **Top tab (right)** | Static `Bini.js Rolldown` label |
+| **Header** | Error type chip, copy button, and close button |
+| **Message** | Cleaned headline in red, with any extra message lines below it |
+| **Code Frame** | File icon, `file (line:column)`, open-in-editor button, and the highlighted source lines |
+| **Call Stack** | Application frames, plus a toggle for ignore-listed framework frames |
 | **Component Stack** | React component hierarchy, when provided by an error boundary |
-| **Navigation** | Prev/Next arrows and counter when multiple errors are queued |
+| **Footer** | "Was this helpful?" thumbs up / down (kept in memory only, not sent anywhere) |
 
-**Code frame example**
+### Error types
+
+The header chip is derived from the error:
+
+| Label | When |
+|-------|------|
+| `Runtime Error` | Errors reported as `runtime` (including via `__bini_error__`), or messages such as `Cannot read`, `is not a function`, `is not defined`, `Element type is invalid` |
+| `Unhandled Rejection` | `unhandledrejection` events |
+| `Parse Error` | `SyntaxError`, `PARSE_ERROR`, `Unexpected token`, `Expected` |
+| `Build Error` | `Transform failed`, `Build failed`, and the fallback |
+| `Type Error` | `TypeError` |
+| *the error's own name* | Any other `name` except `Plugin Error` and `Vite Error` (for example `ReferenceError`) |
+
+### Code frame
+
+- Read from disk through `/__bini_code_context`: **five lines**, two before and two after the failing line.
+- The failing line is marked with `>` and a red row highlight. When a column is known, a `^` caret line is drawn beneath it.
+- Highlighted with [Shiki](https://shiki.style) loaded from `https://esm.sh/shiki@1`, using `dark-plus` or `light-plus` to match the theme. If Shiki cannot load, plain unhighlighted text is shown.
+- `.tsx` / `.jsx` files show the React icon, `.ts` the TypeScript icon, and `.js` the JavaScript icon.
 
 ```
-    10: function Greeting() {
->>> 11:   const name = user.name
+     9: function Greeting() {
+    10:   const user = getUser()
+>   11:   const name = user.name
     12:   return <h1>Hello, {name}!</h1>
     13: }
 ```
 
+### Call stack
+
+- Frames are parsed from `at fn (url:line:column)` lines.
+- **Application frames** (up to 10) are clickable and open your editor at that line.
+- **Framework frames** (up to 20) are collapsed behind a "Show N ignore-listed frame(s)" toggle and are not clickable. A frame counts as framework code when it involves `chunks/node.js`, Vite internals (`/node_modules/vite/`, `.pnpm/vite@`, `/@vite/client`), `rolldown`, `node:internal`, or functions such as `transformWithOxc`, `viteTransformMiddleware`, `EnvironmentPluginContainer`, `loadAndTransform`, and `TransformPluginContext`.
+- Frames are resolved to original source through `/__bini_sourcemap` when the URL looks like a source file (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.svelte`, or under `/src/`).
+
+### Copy button
+
+Copies a Markdown summary to the clipboard:
+
+```
+## Error Type
+<type>
+
+## Error Message
+<headline, details, and `at (file:line:column)`>
+
+    at fn (file:line)      <- application frames
+
+## Code Frame
+<plain-text code frame>
+
+Bini.js (Rolldown)
+```
+
+### Error handling
+
+Errors are captured from:
+
+- `window` `error` events (the overlay calls `preventDefault()`)
+- `unhandledrejection` events (the overlay calls `preventDefault()`)
+- `__bini_error__` custom events from your own error boundaries
+- Vite's `vite:error` HMR event (named `Build Error` when the error has an id, otherwise `Vite Error`)
+
+Processing rules:
+
+- **De-duplication:** two errors with the same file, line, and first 100 characters of message count as one.
+- **Prioritisation:** "real" errors sort first. These are messages containing `PARSE_ERROR`, `Expected`, `Unexpected token`, `Transform failed`, `SyntaxError`, `TypeError`, or `ReferenceError`, errors from the `vite:oxc` plugin, and runtime errors.
+- **Cascade filtering:** `Failed to fetch dynamically imported module`, `Failed to resolve import`, `Failed to load module`, `Loading chunk`, and `ChunkLoadError` are dropped while a real error exists, and are removed when a real error arrives.
+- **Message cleaning:** `vite:oxc` / `vite:` prefixes, non-ASCII characters, and box-drawing lines are stripped. The first remaining line becomes the headline and the rest become detail lines.
+
 ### Error lifecycle
 
 ```
-1. Error occurs   -> badge becomes a red pill and the panel opens
+1. Error occurs    -> badge becomes a red pill and the panel opens
 2. Multiple errors -> navigate with prev/next; duplicates are merged
 3. You fix it      -> HMR update arrives, resolved errors are cleared
 4. All clear       -> panel closes and the badge returns to idle
 ```
 
-### HMR events
-
-| Event | Behaviour |
-|-------|-----------|
-| `vite:error` | Adds the error, shows the pill, opens the panel |
-| `vite:beforeUpdate` | Removes errors belonging to the updated modules and starts the loading animation |
-| `vite:afterUpdate` | Clears remaining errors, closes the panel, and returns the badge to idle |
+| HMR event | Behaviour |
+|-----------|-----------|
+| `vite:error` | Adds the error, shows the pill, and opens the panel |
+| `vite:beforeUpdate` | Removes errors belonging to the updated modules (all errors when the update lists none) and starts the badge loading animation. Closes the panel if nothing remains. |
+| `vite:afterUpdate` | Clears every remaining error, closes the panel, returns the badge to idle, and dispatches `__bini_clear_errors__` |
 
 ### Unrecoverable errors
 
-If the app has crashed so completely that nothing is rendered, or an error carries a component stack, the close button is hidden. The panel stays up until a successful HMR update recovers the page, so you never end up staring at a blank screen.
+The close button is hidden when the current error is a runtime error that carries a component stack, or when the page appears to have rendered nothing at all. The panel stays up until a successful HMR update recovers the page, so you never end up staring at a blank screen.
 
 ---
 
 ## Reporting Errors From Your App
 
-Errors thrown at runtime and unhandled rejections are captured automatically. To route errors from a React **error boundary** into the overlay, dispatch a `__bini_error__` event:
+Uncaught errors and unhandled rejections are captured automatically. To route errors from a React **error boundary** into the overlay, dispatch a `__bini_error__` event:
 
 ```tsx
 componentDidCatch(error: Error, info: React.ErrorInfo) {
@@ -259,15 +297,7 @@ componentDidCatch(error: Error, info: React.ErrorInfo) {
 }
 ```
 
-The overlay dispatches a `__bini_clear_errors__` event on `window` after every successful HMR update, so a boundary can listen for it to reset itself:
-
-```tsx
-useEffect(() => {
-  const reset = () => setHasError(false)
-  window.addEventListener('__bini_clear_errors__', reset)
-  return () => window.removeEventListener('__bini_clear_errors__', reset)
-}, [])
-```
+Routes generated by `bini-router` already dispatch `__bini_error__` for you in development.
 
 **`detail` fields**
 
@@ -277,8 +307,26 @@ useEffect(() => {
 | `name` | `string` | Error name (default `Runtime Error`) |
 | `stack` | `string` | Stack trace, source-mapped when possible |
 | `componentStack` | `string` | Optional React component stack |
-| `file` / `line` | `string` / `number` | Optional; inferred from the stack when omitted |
-| `type` | `string` | Defaults to `runtime` |
+| `file` / `line` | `string` / `number` | Optional. Inferred from the stack or message when omitted. |
+| `type` or `_type` | `string` | Defaults to `runtime` |
+
+---
+
+## Events
+
+| Event (on `window`) | Direction | Description |
+|---------------------|-----------|-------------|
+| `__bini_error__` | You → overlay | Report an error (see above) |
+| `__bini_clear_errors__` | Overlay → you | Fired after every HMR update, once errors are cleared. Use it to reset an error boundary. |
+| `__bini_theme__` | Overlay → you | Fired when the resolved theme changes. `detail` is `'light'` or `'dark'`. |
+
+```tsx
+useEffect(() => {
+  const reset = () => setHasError(false)
+  window.addEventListener('__bini_clear_errors__', reset)
+  return () => window.removeEventListener('__bini_clear_errors__', reset)
+}, [])
+```
 
 ---
 
@@ -288,17 +336,22 @@ The plugins register the following middleware on the Vite dev server. They exist
 
 | Endpoint | Query | Purpose |
 |----------|-------|---------|
-| `/__bini_code_context` | `file`, `line` | Returns the surrounding lines for a code frame. Files are cached by modification time (up to 64 entries). |
-| `/__bini_sourcemap` | `file`, `line`, `column` | Maps a transformed position back to the original source via the module graph. |
-| `/__bini_open_editor` | `file`, `line` | Opens a file at a line in your editor. |
-| `/__bini_route_match` | `path` | Returns `static`, `dynamic`, or `not_found` for a URL. |
-| `/__bini_route_info` | `path` | Returns matched segments, layouts, and page file for the Route Info inspector. |
+| `/__bini_code_context` | `file`, `line` | Returns `{ lines }`: the failing line plus two lines either side, with the failing line prefixed `>>>`. Files are cached by modification time (up to 64 entries). |
+| `/__bini_sourcemap` | `file`, `line`, `column` | Maps a transformed position back to the original source using the client module graph's source map. Returns `{ file, line, column }`, or `404` / `503` when it cannot. |
+| `/__bini_open_editor` | `file`, `line`, `column` | Opens a file in your editor via `launch-editor`. Responds `204` on success, `404` if the file is missing, and `503` if `launch-editor` is not installed. |
+| `/__bini_route_match` | `path` | Returns `{ type, path, routePath }`, where `type` is `static`, `dynamic`, or `not_found`. |
+| `/__bini_route_info` | `path` | Returns `{ path, type, segments, layouts, pageFile }` for Route Info. |
+| `/__bini_font/<font>/<file>` | n/a | Serves the Inter / Geist `.woff2` / `.woff` files from the Fontsource packages. |
 
-The route manifest is built lazily from `appDir` and invalidated automatically when files under it are added, changed, or removed.
+The two route endpoints build a manifest from `src/app` with `bini-router`'s `generateRouteManifest()`, match with `matchManifestRoute()`, and cache the manifest for 200 ms, so a route you just added or removed shows up on the next lookup after that. The Vite `base` is stripped from the incoming path before matching.
 
-### Supported editors
+### Editor detection
 
-`code`, `cursor`, `zed`, `subl`, `webstorm`. Pass the `editor` option to force a specific binary.
+Editor detection is fully delegated to [`launch-editor`](https://www.npmjs.com/package/launch-editor), which finds a running or configured editor for you. You can force one with the `LAUNCH_EDITOR` environment variable. If no editor can be launched, a warning is printed to the dev server console.
+
+### Fonts
+
+The overlay UI uses **Inter** and **Geist** variable fonts. `@fontsource-variable/inter` and `@fontsource-variable/geist` are regular dependencies, so they are installed automatically. On dev server start the plugin resolves them, rewrites their font URLs to `/__bini_font/...`, and injects the CSS into `<head>`. If a package still cannot be resolved (for example, a broken install), the overlay falls back to system fonts. Font files are served with a long-lived immutable cache header.
 
 ---
 
@@ -306,25 +359,27 @@ The route manifest is built lazily from `appDir` and invalidated automatically w
 
 The overlay exposes file-reading and process-launching endpoints, so they are locked down:
 
-- **Same-origin only.** Requests are checked via `Sec-Fetch-Site`, falling back to an `Origin`/`Host` comparison. Cross-origin requests receive `403`.
-- **Project-root confinement.** Code-context and open-in-editor paths are resolved and rejected if they escape the current working directory.
+- **Same-origin only.** `/__bini_code_context`, `/__bini_sourcemap`, `/__bini_open_editor`, `/__bini_route_match`, and `/__bini_route_info` check `Sec-Fetch-Site` (allowing `same-origin` and `none`), falling back to an `Origin` / `Host` comparison. Cross-origin requests receive `403`.
+- **Working-directory confinement.** `/__bini_code_context` and `/__bini_open_editor` resolve the requested path and reject it with `403` if it escapes the current working directory.
+- **Fonts are confined too.** `/__bini_font` only serves `.woff2` / `.woff` files that sit inside the matching Fontsource package's `files` directory.
 - **Dev server only.** Every plugin uses `apply: 'serve'`; none run in `vite build`.
 
 ---
 
 ## Architecture
 
-`biniOverlay()` returns seven cooperating plugins:
+`biniOverlay()` returns eight cooperating plugins, in this order:
 
 | Plugin | Role |
 |--------|------|
+| `bini-overlay:font` | Serves Inter / Geist from Fontsource and injects their CSS into `<head>` |
 | `bini-overlay:code-context` | Serves code frames from disk |
 | `bini-overlay:sourcemap` | Resolves source-mapped stack positions |
 | `bini-overlay:open-editor` | Launches your editor at a file and line |
 | `bini-overlay:routes` | Route matching and route info via `bini-router` |
-| `bini-overlay:vite-intercept` | Neutralises Vite's built-in `vite-error-overlay` element |
-| `bini-overlay:error` | Client-side error capture and the error panel |
-| `bini-overlay:loading` | Badge, menu, route info, and preferences |
+| `bini-overlay:vite-intercept` | Registers a hidden `vite-error-overlay` element so Vite's built-in overlay never shows |
+| `bini-overlay:error` | Client-side error capture and the error panel, injected as a module script at the start of `<head>` |
+| `bini-overlay:loading` | Badge, menu, Route Info, and preferences, injected as a module script before `</body>` (omitted when `disableBadge` is set) |
 
 ---
 
@@ -333,19 +388,31 @@ The overlay exposes file-reading and process-launching endpoints, so they are lo
 | | Version |
 |---|---|
 | Node.js | `>= 18.0.0` |
-| Vite | `>= 8.0.0` (Rolldown-based) |
+| Vite | `>= 8.0.0` (Rolldown-based, peer dependency) |
+| bini-router | `>= 2.0.0` (peer dependency) |
 
-**Dependencies**
+**Dependencies (installed automatically)**
 
-| Package | Type | Purpose |
-|---------|------|---------|
-| `vite` (`>= 8.0.0`) | Peer, required | Host build tool and dev server. Vite 7 and earlier are not supported. |
-| [`bini-router`](https://www.npmjs.com/package/bini-router) (`>= 2.0.0`) | Peer, **optional** | Route type and Route Info in the badge menu. Without it, everything else still works. |
-| `@jridgewell/trace-mapping` | Dependency (installed automatically) | Resolves source-mapped stack frames |
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `@jridgewell/trace-mapping` | `^0.3.25` | Resolves source-mapped stack frames (loaded on first lookup) |
+| `launch-editor` | `^2.14.2` | Opens files in your editor (loaded on first use) |
+| `simple-icons` | `^16.34.0` | React / TypeScript / JavaScript file icons in the code frame |
+| `@fontsource-variable/inter` | `^5.3.0` | Overlay font, served locally |
+| `@fontsource-variable/geist` | `^5.3.0` | Overlay font, served locally |
 
-The package ships both ESM (`dist/index.js`) and CommonJS (`dist/index.cjs`) builds, with bundled TypeScript types.
+**Peer dependencies (not bundled)**
 
-**Network access:** syntax highlighting loads Shiki from `esm.sh`, and the badge UI loads Inter and JetBrains Mono from Google Fonts. Offline, the overlay still works with plain text and system fonts.
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `vite` | `>=8.0.0` | Host build tool and dev server |
+| [`bini-router`](https://www.npmjs.com/package/bini-router) | `>=2.0.0` | Imported at dev-server start for route type and Route Info. Must export `generateRouteManifest` and `matchManifestRoute`. |
+
+Peer dependencies and dependencies are kept external in the build, so none of the packages above are inlined into `dist`.
+
+The package is `"type": "module"` and ships ESM (`dist/index.js`) and CommonJS (`dist/index.cjs`) builds with bundled TypeScript types (`dist/index.d.ts`). It is marked `sideEffects: false`.
+
+**Network access:** syntax highlighting loads Shiki from `esm.sh`. Fonts are served locally and do not need network access. Offline, the overlay still works with plain-text code frames.
 
 ---
 
@@ -355,7 +422,7 @@ The package ships both ESM (`dist/index.js`) and CommonJS (`dist/index.cjs`) bui
 <summary><strong>The overlay doesn't appear</strong></summary>
 
 - Make sure you're running the dev server (`npm run dev`), not a production build.
-- Confirm `...biniOverlay()` is in the `plugins` array of `vite.config.ts`, and that you spread it.
+- Confirm `biniOverlay()` is in the `plugins` array of `vite.config.ts`.
 - Confirm the package is installed as a dev dependency.
 </details>
 
@@ -366,10 +433,16 @@ Shiki is loaded at runtime from `esm.sh`. If it can't be reached, frames render 
 </details>
 
 <details>
+<summary><strong>The dev server errors about <code>bini-router</code> on startup</strong></summary>
+
+`bini-router` is a peer dependency that `bini-overlay` imports when the dev server starts. Make sure it is installed in your project (your package manager may have warned about a missing peer), and that the version is `>= 2.0.0` and exports `generateRouteManifest` and `matchManifestRoute`.
+</details>
+
+<details>
 <summary><strong>Route type or Route Info shows "Not Found" everywhere</strong></summary>
 
-- Install `bini-router` (`>= 2.0.0`) in your project. It is an optional peer dependency and is not installed with `bini-overlay`.
-- Set `appDir` to match the directory you pass to `biniroute()`.
+- Check that your routes live in `src/app`, which is the directory `bini-overlay` scans.
+- Check the terminal for a `bini-router` error such as a route conflict. The manifest can't be built until it is fixed.
 </details>
 
 <details>
@@ -381,13 +454,13 @@ Frames are mapped through Vite's module graph, so a frame can only be resolved i
 <details>
 <summary><strong>Clicking a stack frame does nothing</strong></summary>
 
-No supported editor was found on your `PATH`. Install the shell command for your editor (for example, "Install 'code' command" in VS Code), or set the `editor` option.
+Check the dev server terminal. `launch-editor` could not find an editor (or, if it failed to install, the endpoint returns `503`; run `npm i launch-editor`). Set the `LAUNCH_EDITOR` environment variable, or install your editor's shell command (for example, "Install 'code' command" in VS Code).
 </details>
 
 <details>
 <summary><strong><code>403 Forbidden</code> from <code>/__bini_*</code> endpoints</strong></summary>
 
-The endpoints reject cross-origin requests. If the dev server is behind a proxy on a different origin, open it directly instead.
+The endpoints reject cross-origin requests. If the dev server is behind a proxy on a different origin, open it directly instead. Paths outside the working directory are also rejected.
 </details>
 
 <details>
@@ -399,7 +472,7 @@ It may be hidden for the session. Press your shortcut (default `Alt+B`) to bring
 <details>
 <summary><strong>The overlay stays open after I fix the error</strong></summary>
 
-The panel closes on `vite:afterUpdate`. Update to the latest version, and check the terminal for a build error that is still failing.
+The panel closes on `vite:afterUpdate`. If the page crashed so hard that nothing renders, the close button is hidden until an update recovers it. Also check the terminal for a build error that is still failing.
 </details>
 
 ---
@@ -427,5 +500,6 @@ MIT © [Binidu Ranasinghe](https://bini.js.org)
 
 - [Bini.js](https://bini.js.org): The React framework for cross-platform apps
 - [bini-router](https://www.npmjs.com/package/bini-router): File-based routing for Bini.js
+- [bini-ssg](https://www.npmjs.com/package/bini-ssg): Static site generation for Bini.js
 - [bini-server](https://www.npmjs.com/package/bini-server): Production server for Bini.js
 - [bini-deploy](https://www.npmjs.com/package/bini-deploy): Zero-config deployment for Bini.js

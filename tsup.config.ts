@@ -8,8 +8,9 @@ export default defineConfig({
   sourcemap  : true,
   splitting  : false,
   treeshake  : true,
+  shims      : true,
   target     : 'es2022',
-  external   : ['vite'],
+  external   : ['vite', 'bini-router'],
   esbuildOptions(opts) {
     opts.platform = 'node';
   },

@@ -7,16 +7,12 @@ import type {
 } from 'vite';
 import fs from 'fs';
 import path from 'path';
-import { execSync, spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 import type { IncomingMessage, ServerResponse } from 'http';
+import { siReact, siTypescript, siJavascript } from 'simple-icons';
 
-// ─────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────
 export interface BiniOverlayOptions {
-  appDir?: string;
   disableBadge?: boolean;
-  editor?: string;
 }
 
 interface BiniPlugin extends Plugin {
@@ -24,9 +20,72 @@ interface BiniPlugin extends Plugin {
   apply?: 'serve' | 'build' | ((this: void, config: any, env: any) => boolean);
 }
 
-// ─────────────────────────────────────────────────────────────
-// Shared constants
-// ─────────────────────────────────────────────────────────────
+const ICON_REACT = siReact.path;
+const ICON_TYPESCRIPT = siTypescript.path;
+const ICON_JAVASCRIPT = siJavascript.path;
+
+const FONT_PACKAGES: Record<string, string> = {
+  inter: '@fontsource-variable/inter',
+  geist: '@fontsource-variable/geist',
+};
+const FONT_BASE_TOKEN = '__BINI_FONT_BASE__';
+const fontCssCache = new Map<string, string>();
+const fontDirs = new Map<string, string>();
+
+function findFontsourceCssPath(pkg: string): string | null {
+  try {
+    const resolved = import.meta.resolve(`${pkg}/index.css`);
+    const cssPath = resolved.startsWith('file:') ? fileURLToPath(resolved) : resolved;
+    if (fs.existsSync(cssPath)) return cssPath;
+  } catch {
+  }
+
+  const parts = pkg.split('/');
+  const candidates = [
+    path.join(process.cwd(), 'node_modules', ...parts, 'index.css'),
+    path.join(__dirname, '..', 'node_modules', ...parts, 'index.css'),
+    path.join(__dirname, '..', '..', 'node_modules', ...parts, 'index.css'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function loadFontsourceCss(key: string): string {
+  const cached = fontCssCache.get(key);
+  if (cached !== undefined) return cached;
+
+  let css = '';
+  const pkg = FONT_PACKAGES[key];
+  const cssPath = pkg ? findFontsourceCssPath(pkg) : null;
+  if (cssPath) {
+    try {
+      const raw = fs.readFileSync(cssPath, 'utf8');
+      fontDirs.set(key, path.join(path.dirname(cssPath), 'files'));
+      css = raw.replace(
+        /url\(\s*(['"]?)\.\/files\/([^'")\s]+)\1\s*\)/g,
+        (_m, q: string, file: string) => `url(${q}${FONT_BASE_TOKEN}__bini_font/${key}/${file}${q})`,
+      );
+    } catch {
+      css = '';
+    }
+  }
+
+  fontCssCache.set(key, css);
+  return css;
+}
+
+function loadFontCss(base: string = '/'): string {
+  const b = base.endsWith('/') ? base : base + '/';
+  return Object.keys(FONT_PACKAGES)
+    .map((key) => loadFontsourceCss(key))
+    .filter(Boolean)
+    .join('\n')
+    .split(FONT_BASE_TOKEN)
+    .join(b);
+}
+
 const BINI_PATH =
   'M8.04688 29.9219V24.8047C9.1276 25.4948 10.2734 25.8398 11.4844 25.8398C12.5651 25.8398' +
   ' 13.4245 25.5013 14.0625 24.8242C14.7135 24.1341 15.0391 23.1901 15.0391 21.9922C15.0391' +
@@ -44,17 +103,13 @@ const COPY_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" x
 const CHECK_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const PREV_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.24996 12.0608L8.71963 11.5304L5.89641 8.70722C5.50588 8.3167 5.50588 7.68353 5.89641 7.29301L8.71963 4.46978L9.24996 3.93945L10.3106 5.00011L9.78029 5.53044L7.31062 8.00011L9.78029 10.4698L10.3106 11.0001L9.24996 12.0608Z" fill="currentColor"/></svg>`;
 const NEXT_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.75011 3.93945L7.28044 4.46978L10.1037 7.29301C10.4942 7.68353 10.4942 8.3167 10.1037 8.70722L7.28044 11.5304L6.75011 12.0608L5.68945 11.0001L6.21978 10.4698L8.68945 8.00011L6.21978 5.53044L5.68945 5.00011L6.75011 3.93945Z" fill="currentColor"/></svg>`;
-const CHEVRON_RIGHT = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none"><path fill="#666" fill-rule="evenodd" clip-rule="evenodd" d="M5.50011 1.93945L6.03044 2.46978L10.8537 7.293C11.2442 7.68353 11.2442 8.31669 10.8537 8.70722L6.03044 13.5304L5.50011 14.0608L4.43945 13.0001L4.96978 12.4698L9.43945 8.00011L4.96978 3.53044L4.43945 3.00011L5.50011 1.93945Z"></path></svg>`;
-const CHEVRON_UP = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M3.93945 10.5001L4.46978 9.96978L8.00011 6.44011L11.5304 9.96978L12.0608 10.5001L13.0001 9.43945L12.4698 8.90912L8.53044 4.96978C8.23756 4.67689 7.76267 4.67689 7.46978 4.96978L3.53044 8.90912L3.00011 9.43945L3.93945 10.5001Z" fill="currentColor"/></svg>`;
+const CHEVRON_RIGHT = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M5.50011 1.93945L6.03044 2.46978L10.8537 7.293C11.2442 7.68353 11.2442 8.31669 10.8537 8.70722L6.03044 13.5304L5.50011 14.0608L4.43945 13.0001L4.96978 12.4698L9.43945 8.00011L4.96978 3.53044L4.43945 3.00011L5.50011 1.93945Z"></path></svg>`;
 const CHEVRON_DOWN = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M12.0608 5.50011L11.5304 6.03044L8.00011 9.56011L4.46978 6.03044L3.93945 5.50011L3.00011 6.56078L3.53044 7.09111L7.46978 11.0304C7.76267 11.3233 8.23756 11.3233 8.53044 11.0304L12.4698 7.09111L13.0001 6.56078L12.0608 5.50011Z" fill="currentColor"/></svg>`;
 const CLOSE_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
 const GEAR_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
 const EYE_OFF_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
-const INDENT_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 9 12 3 18"/><line x1="21" y1="6" x2="12" y2="6"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="21" y1="18" x2="12" y2="18"/></svg>`;
+const ROUTE_ARROW_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>`;
 
-// ─────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────
 function isDev(ctx: IndexHtmlTransformContext): boolean {
   return !!ctx.server;
 }
@@ -62,13 +117,13 @@ function isDev(ctx: IndexHtmlTransformContext): boolean {
 function scriptTag(
   js: string,
   injectTo: HtmlTagDescriptor['injectTo'] = 'head-prepend',
-  isModule: boolean = true
+  isModule: boolean = true,
 ): HtmlTagDescriptor {
   return {
     tag: 'script',
     attrs: isModule ? { type: 'module' } : {},
     children: js,
-    injectTo
+    injectTo,
   };
 }
 
@@ -92,9 +147,60 @@ function rejectCrossOrigin(res: ServerResponse): void {
   res.end(JSON.stringify({ error: 'Forbidden: cross-origin request' }));
 }
 
-// ─────────────────────────────────────────────────────────────
-// PLUGIN 1 — HMR loading badge with menu
-// ─────────────────────────────────────────────────────────────
+function biniFontPlugin(): BiniPlugin {
+  return {
+    name: 'bini-overlay:font',
+    apply: 'serve',
+
+    configureServer(server: ViteDevServer) {
+      Object.keys(FONT_PACKAGES).forEach((key) => loadFontsourceCss(key));
+
+      server.middlewares.use('/__bini_font', (req: IncomingMessage, res: ServerResponse) => {
+        const pathname = (req.url || '').split('?')[0] ?? '';
+        const m = /^\/([a-z]+)\/([\w.-]+\.(?:woff2|woff))$/i.exec(pathname);
+        const fontKey = m?.[1];
+        const fontName = m?.[2];
+        const dir = fontKey ? fontDirs.get(fontKey) : undefined;
+        if (!fontKey || !fontName || !dir) {
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+
+        const file = path.join(dir, fontName);
+        if (!file.startsWith(dir + path.sep) || !fs.existsSync(file)) {
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+
+        res.setHeader('Content-Type', fontName.endsWith('.woff2') ? 'font/woff2' : 'font/woff');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        fs.createReadStream(file).pipe(res);
+      });
+    },
+
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html: string, ctx: IndexHtmlTransformContext): HtmlTagDescriptor[] | string {
+        if (!isDev(ctx)) return html;
+
+        const css = loadFontCss(ctx.server?.config.base || '/');
+        if (!css) return html;
+
+        return [
+          {
+            tag: 'style',
+            attrs: { 'data-bini-font': 'inter-geist' },
+            children: css,
+            injectTo: 'head-prepend',
+          },
+        ];
+      },
+    },
+  };
+}
+
 function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
   const isDisabled = options.disableBadge === true;
 
@@ -117,7 +223,6 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
   container.id = "bini-loading-root";
   document.body.appendChild(container);
   var sr = container.attachShadow({ mode: "open" });
-  sr.id = "bini-loading-shadow";
 
   var PREFS_KEY = 'bini-overlay:prefs';
   var HIDE_SESSION_KEY = 'bini-overlay:hide-session';
@@ -173,53 +278,55 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
 
   function sizeDims(size) {
     switch (size) {
-      case 'small':  return { pill: 36, logoW: 14, logoH: 19, circle: 28, count: 14, label: 12, pad: 12 };
-      case 'large':  return { pill: 56, logoW: 24, logoH: 33, circle: 46, count: 20, label: 17, pad: 20 };
-      default:       return { pill: 48, logoW: 20, logoH: 28, circle: 40, count: 18, label: 15, pad: 16 };
+      case 'small':  return { pill: 36, logoW: 14, logoH: 19, circle: 28, label: 12, pad: 12 };
+      case 'large':  return { pill: 56, logoW: 24, logoH: 33, circle: 46, label: 17, pad: 20 };
+      default:       return { pill: 48, logoW: 20, logoH: 28, circle: 40, label: 15, pad: 16 };
     }
   }
 
   var style = document.createElement("style");
   style.textContent = [
-    "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');",
-    ":host { all: initial; display: block; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }",
+    ":host {",
+    "  all: initial;",
+    "  display: block;",
+    "  font-family: 'Inter Variable', 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
+    "}",
     "",
     ":host {",
     "  --bini-bg: #0a0a0a;",
     "  --bini-text: #e4e4e7;",
     "  --bini-text-muted: #71717a;",
+    "  --bini-menu-value: #a1a1aa;",
     "  --bini-border: rgba(255,255,255,0.08);",
     "  --bini-border-strong: rgba(255,255,255,0.18);",
     "  --bini-hover: rgba(255,255,255,0.06);",
     "  --bini-chip-bg: rgba(255,255,255,0.05);",
-    "  --bini-menu-shadow: 0 8px 30px rgba(0,0,0,0.6);",
-    "  --bini-route: #60a5fa;",
     "  --bini-accent: #3b82f6;",
     "  --bini-dropdown-bg: #111111;",
     "  --bini-dropdown-border: rgba(255,255,255,0.1);",
     "  --bini-dropdown-hover: rgba(255,255,255,0.08);",
     "  --bini-badge-bg: #0a0a0a;",
     "  --bini-badge-border: rgba(255,255,255,0.15);",
-    "  --bini-badge-shadow: 0 4px 20px rgba(0,0,0,0.5);",
     "  --bini-menu-label: #ffffff;",
+    "  --bini-font-sans: 'Inter Variable', 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
+    "  --bini-font-geist: 'Geist Variable', 'Geist', 'Inter Variable', 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
+    "  --bini-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;",
     "}",
     ":host([data-theme='light']) {",
     "  --bini-bg: #ffffff;",
     "  --bini-text: #18181b;",
     "  --bini-text-muted: #6b7280;",
+    "  --bini-menu-value: #6b7280;",
     "  --bini-border: rgba(0,0,0,0.08);",
     "  --bini-border-strong: rgba(0,0,0,0.18);",
     "  --bini-hover: rgba(0,0,0,0.04);",
     "  --bini-chip-bg: rgba(0,0,0,0.04);",
-    "  --bini-menu-shadow: 0 8px 30px rgba(0,0,0,0.15);",
-    "  --bini-route: #2563eb;",
     "  --bini-accent: #2563eb;",
     "  --bini-dropdown-bg: #ffffff;",
     "  --bini-dropdown-border: rgba(0,0,0,0.1);",
     "  --bini-dropdown-hover: rgba(0,0,0,0.04);",
     "  --bini-badge-bg: #0a0a0a;",
     "  --bini-badge-border: rgba(255,255,255,0.15);",
-    "  --bini-badge-shadow: 0 4px 20px rgba(0,0,0,0.5);",
     "  --bini-menu-label: #18181b;",
     "}",
     "",
@@ -231,18 +338,17 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     "  z-index: 2147483647; border-radius: 50%;",
     "  background: var(--bini-badge-bg);",
     "  border: 1px solid var(--bini-badge-border);",
-    "  box-shadow: var(--bini-badge-shadow);",
     "  pointer-events: auto; cursor: pointer;",
     "  transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1);",
     "  overflow: hidden;",
     "}",
     "#w.has-errors {",
+    "  box-sizing: border-box;",
     "  width: auto;",
     "  max-width: none;",
     "  border-radius: 999px;",
-    "  background: #dc2626;",
+    "  background: #cf3535;",
     "  border: none;",
-    "  box-shadow: 0 4px 20px rgba(220,38,38,0.4), 0 2px 6px rgba(0,0,0,0.3);",
     "  padding: 0;",
     "  gap: 0;",
     "  height: var(--bini-pill-h, 40px);",
@@ -273,10 +379,10 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     "}",
     "#w.has-errors .ep { display: flex; opacity: 1; }",
     ".ep-icon {",
-    "  width: var(--bini-circle-size, 40px);",
-    "  height: var(--bini-circle-size, 40px);",
-    "  min-width: var(--bini-circle-size, 40px);",
-    "  background: rgba(0,0,0,0.28);",
+    "  width: var(--bini-pill-h, 40px);",
+    "  height: var(--bini-pill-h, 40px);",
+    "  min-width: var(--bini-pill-h, 40px);",
+    "  background: rgba(255,255,255,0.14);",
     "  border-radius: 50%;",
     "  display: flex; align-items: center; justify-content: center;",
     "  flex-shrink: 0;",
@@ -287,35 +393,41 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     "  z-index: 2;",
     "}",
     ".ep-icon:hover {",
-    "  background: rgba(0,0,0,0.42);",
+    "  background: rgba(255,255,255,0.24);",
     "}",
     ".ep-icon svg {",
-    "  width: var(--bini-logo-w, 20px);",
-    "  height: var(--bini-logo-h, 28px);",
+    "  width: var(--bini-icon-logo-w, 16px);",
+    "  height: var(--bini-icon-logo-h, 22px);",
     "  display: block;",
     "}",
     ".ep-content {",
-    "  display: flex; align-items: center; gap: 6px;",
-    "  padding: 0 var(--bini-pill-pad, 16px) 0 8px;",
+    "  display: flex; align-items: center; gap: 5px;",
+    "  padding: 0 calc(var(--bini-pill-pad, 16px) - 4px) 0 8px;",
+    "  margin: 0 4px 0 0;",
     "  cursor: pointer;",
-    "  height: 100%;",
+    "  height: calc(100% - 8px);",
     "  position: relative;",
     "  z-index: 1;",
     "  white-space: nowrap;",
     "  flex-shrink: 0;",
+    "  border-radius: 999px;",
+    "  transition: background 0.15s;",
+    "}",
+    ".ep-content:hover {",
+    "  background: rgba(255,255,255,0.16);",
     "}",
     ".ep-count {",
-    "  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
-    "  font-size: var(--bini-count-size, 18px);",
-    "  font-weight: 700;",
+    "  font-family: var(--bini-font-geist);",
+    "  font-size: var(--bini-label-size, 15px);",
+    "  font-weight: 600;",
     "  color: #ffffff;",
     "  line-height: 1;",
-    "  letter-spacing: -0.02em;",
+    "  letter-spacing: -0.01em;",
     "}",
     ".ep-label {",
-    "  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
+    "  font-family: var(--bini-font-geist);",
     "  font-size: var(--bini-label-size, 15px);",
-    "  font-weight: 700;",
+    "  font-weight: 600;",
     "  color: #ffffff;",
     "  white-space: nowrap;",
     "  letter-spacing: -0.01em;",
@@ -335,11 +447,10 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     "  background: var(--bini-bg);",
     "  border: 1px solid var(--bini-border-strong);",
     "  border-radius: 12px;",
-    "  box-shadow: var(--bini-menu-shadow);",
     "  z-index: 2147483647;",
     "  display: none;",
     "  overflow: hidden;",
-    "  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
+    "  font-family: var(--bini-font-sans);",
     "  padding: 6px;",
     "}",
     "#bini-menu.show { display: block; }",
@@ -370,7 +481,6 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     ".bini-issue-dot {",
     "  width: 8px; height: 8px; border-radius: 50%;",
     "  background: #ef4444;",
-    "  box-shadow: 0 0 6px rgba(239,68,68,0.6);",
     "}",
     ".bini-issue-count {",
     "  color: var(--bini-text);",
@@ -394,21 +504,12 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     "  font-weight: 400;",
     "}",
     ".bini-menu-value {",
-    "  color: var(--bini-text-muted);",
+    "  color: var(--bini-menu-value);",
     "  font-size: 13px;",
     "  font-weight: 400;",
     "  display: flex; align-items: center; gap: 6px;",
     "}",
-    ".bini-route-value {",
-    "  color: var(--bini-text-muted);",
-    "  max-width: 120px;",
-    "  overflow: hidden;",
-    "  text-overflow: ellipsis;",
-    "  white-space: nowrap;",
-    "  font-family: 'JetBrains Mono', ui-monospace, monospace;",
-    "  font-size: 12px;",
-    "}",
-    ".bini-menu-value-icon { display: inline-flex; align-items: center; color: var(--bini-text-muted); }",
+    ".bini-menu-value-icon { display: inline-flex; align-items: center; color: var(--bini-menu-value); }",
     "",
     ".bini-menu-divider {",
     "  height: 1px; background: var(--bini-border);",
@@ -422,10 +523,9 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     "  background: var(--bini-bg);",
     "  border: 1px solid var(--bini-border-strong);",
     "  border-radius: 12px;",
-    "  box-shadow: var(--bini-menu-shadow);",
     "  z-index: 2147483647;",
     "  display: none;",
-    "  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
+    "  font-family: var(--bini-font-sans);",
     "  padding: 6px;",
     "  max-height: 80vh;",
     "  overflow-y: auto;",
@@ -496,6 +596,7 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     "  font-size: 14px;",
     "  color: var(--bini-text);",
     "  font-weight: 500;",
+    "  font-family: var(--bini-font-mono);",
     "}",
     "",
     ".bini-segment-tree { padding: 8px 0; }",
@@ -509,6 +610,7 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     "  font-size: 13px;",
     "  font-weight: 500;",
     "  flex-shrink: 0;",
+    "  font-family: var(--bini-font-mono);",
     "}",
     ".bini-segment-spacer { flex: 1; }",
     ".bini-chip {",
@@ -519,10 +621,9 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     "  border-radius: 6px;",
     "  font-size: 11px;",
     "  color: var(--bini-text);",
-    "  font-family: 'JetBrains Mono', ui-monospace, monospace;",
+    "  font-family: var(--bini-font-mono);",
     "}",
     "",
-    "/* Custom Dropdown */",
     ".bini-dropdown {",
     "  position: relative;",
     "  display: inline-block;",
@@ -551,7 +652,6 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     "  background: var(--bini-dropdown-bg);",
     "  border: 1px solid var(--bini-dropdown-border);",
     "  border-radius: 8px;",
-    "  box-shadow: 0 8px 30px rgba(0,0,0,0.6);",
     "  z-index: 2147483647;",
     "  display: none;",
     "  overflow: hidden;",
@@ -573,7 +673,6 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     ""
   ].join("\\n");
 
-  var dims = sizeDims(prefs.size);
   var posStyles = positionStyles(prefs.position);
   var posStyleStr = Object.keys(posStyles).map(function (k) { return k + ':' + posStyles[k]; }).join(';');
 
@@ -623,7 +722,6 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     '</div>' +
     '</div>';
 
-  // ── Preferences Popover ──────────────────────────────────────
   var prefsPopover = document.createElement("div");
   prefsPopover.className = "bini-popover";
   prefsPopover.id = "bini-prefs-popover";
@@ -702,7 +800,6 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
       '</div>' +
     '</div>';
 
-  // ── Route Info Popover ──────────────────────────────────────
   var routePopover = document.createElement("div");
   routePopover.className = "bini-popover";
   routePopover.id = "bini-route-popover";
@@ -713,7 +810,7 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     '</div>' +
     '<div class="bini-popover-body" id="bini-route-body">' +
       '<div class="bini-route-path-row">' +
-        '<span class="bini-route-path-icon">' + '${INDENT_ICON}' + '</span>' +
+        '<span class="bini-route-path-icon">' + '${ROUTE_ARROW_ICON}' + '</span>' +
         '<span class="bini-route-path" id="bini-route-path">/</span>' +
       '</div>' +
       '<div class="bini-segment-tree" id="bini-segment-tree"></div>' +
@@ -736,6 +833,7 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
   function applyTheme() {
     var resolved = resolveTheme(prefs.theme);
     container.setAttribute('data-theme', resolved);
+    try { window.dispatchEvent(new CustomEvent('__bini_theme__', { detail: resolved })); } catch (_e) {}
   }
   applyTheme();
 
@@ -753,56 +851,32 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     Object.keys(p).forEach(function (k) { el.style[k] = p[k]; });
     var d = sizeDims(prefs.size);
 
+    var iconLogoH = Math.round(d.circle * 0.5);
+    var iconLogoW = Math.round(iconLogoH * 22 / 31);
+
     el.style.setProperty('--bini-badge-size', d.pill + 'px');
     el.style.setProperty('--bini-logo-w', d.logoW + 'px');
     el.style.setProperty('--bini-logo-h', d.logoH + 'px');
-    el.style.setProperty('--bini-circle-size', d.circle + 'px');
+    el.style.setProperty('--bini-icon-logo-w', iconLogoW + 'px');
+    el.style.setProperty('--bini-icon-logo-h', iconLogoH + 'px');
     el.style.setProperty('--bini-pill-h', d.circle + 'px');
     el.style.setProperty('--bini-pill-pad', d.pad + 'px');
-    el.style.setProperty('--bini-count-size', d.count + 'px');
     el.style.setProperty('--bini-label-size', d.label + 'px');
 
-    menuEl.style.top = ''; menuEl.style.bottom = ''; menuEl.style.left = ''; menuEl.style.right = '';
-    if (prefs.position === 'top-left') {
-      menuEl.style.top = (20 + d.pill + 12) + 'px';
-      menuEl.style.left = '20px';
-    } else if (prefs.position === 'top-right') {
-      menuEl.style.top = (20 + d.pill + 12) + 'px';
-      menuEl.style.right = '20px';
-    } else if (prefs.position === 'bottom-right') {
-      menuEl.style.bottom = (20 + d.pill + 12) + 'px';
-      menuEl.style.right = '20px';
-    } else {
-      menuEl.style.bottom = (20 + d.pill + 12) + 'px';
-      menuEl.style.left = '20px';
-    }
-
-    var popovers = [prefsPopover, routePopover];
-    popovers.forEach(function(popover) {
-      popover.style.top = ''; popover.style.bottom = ''; popover.style.left = ''; popover.style.right = '';
-      if (prefs.position === 'top-left') {
-        popover.style.top = (20 + d.pill + 12) + 'px';
-        popover.style.left = '20px';
-      } else if (prefs.position === 'top-right') {
-        popover.style.top = (20 + d.pill + 12) + 'px';
-        popover.style.right = '20px';
-      } else if (prefs.position === 'bottom-right') {
-        popover.style.bottom = (20 + d.pill + 12) + 'px';
-        popover.style.right = '20px';
-      } else {
-        popover.style.bottom = (20 + d.pill + 12) + 'px';
-        popover.style.left = '20px';
-      }
+    var offset = (20 + d.pill + 12) + 'px';
+    var isTop = prefs.position.indexOf('top') === 0;
+    var isRight = prefs.position.slice(-5) === 'right';
+    [menuEl, prefsPopover, routePopover].forEach(function (node) {
+      node.style.top = isTop ? offset : '';
+      node.style.bottom = isTop ? '' : offset;
+      node.style.left = isRight ? '' : '20px';
+      node.style.right = isRight ? '20px' : '';
     });
   }
   applyPositionAndSize();
 
   function applyHiddenState() {
-    if (isHiddenSession) {
-      container.style.display = 'none';
-    } else {
-      container.style.display = 'block';
-    }
+    container.style.display = isHiddenSession ? 'none' : 'block';
   }
   applyHiddenState();
 
@@ -985,8 +1059,7 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     }
   });
 
-  // ── Custom Dropdown Logic ────────────────────────────────────
-  function setupDropdown(id, onChange) {
+  function setupDropdown(id, initialValue, onChange) {
     var dropdown = sr.getElementById(id);
     if (!dropdown) return;
     var toggle = dropdown.querySelector('.bini-dropdown-toggle');
@@ -1018,20 +1091,20 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
       });
     });
 
-    updateDisplay(toggle.getAttribute('data-value'));
+    updateDisplay(initialValue || toggle.getAttribute('data-value'));
   }
 
-  setupDropdown('dd-theme', function(val) {
+  setupDropdown('dd-theme', prefs.theme, function(val) {
     prefs.theme = val;
     savePrefs(prefs);
     applyTheme();
   });
-  setupDropdown('dd-position', function(val) {
+  setupDropdown('dd-position', prefs.position, function(val) {
     prefs.position = val;
     savePrefs(prefs);
     applyPositionAndSize();
   });
-  setupDropdown('dd-size', function(val) {
+  setupDropdown('dd-size', prefs.size, function(val) {
     prefs.size = val;
     savePrefs(prefs);
     applyPositionAndSize();
@@ -1128,7 +1201,7 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
   function renderNotFoundMessage(currentPath) {
     return '<div style="padding:12px 20px;color:var(--bini-text-muted);font-size:12px;line-height:1.6;">' +
       'No matching route for ' +
-      '<code style="font-family:\\'JetBrains Mono\\', ui-monospace, monospace;color:#f87171;background:rgba(248,113,113,0.1);padding:1px 5px;border-radius:3px;">' +
+      '<code style="font-family:var(--bini-font-mono);color:#f87171;background:rgba(248,113,113,0.1);padding:1px 5px;border-radius:3px;">' +
       escapeHtml(currentPath) +
       '</code>' +
       '<br><span style="color:var(--bini-text-muted);opacity:0.7;margin-top:4px;display:inline-block;">This URL renders your 404 page.</span>' +
@@ -1167,7 +1240,6 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
     if (data.segments && data.segments.length) {
       for (var j = 0; j < data.segments.length; j++) {
         var seg = data.segments[j];
-        // Next.js style — only show chip for meaningful (non-static) segments
         var chipHtml = '';
         if (seg.kind === 'dynamic' || seg.kind === 'catch-all') {
           chipHtml = '<span class="bini-chip">' + escapeHtml(seg.kind) + '</span>';
@@ -1242,26 +1314,26 @@ function biniLoadingPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// PLUGIN 2 — Error overlay
-// ─────────────────────────────────────────────────────────────
 function biniErrorOverlay(): BiniPlugin {
-  const shikiTheme = 'dark-plus';
-
   const theme = {
-    bg: '#0a0a0a',
-    surface: '#0a0a0a',
-    surfaceMuted: '#050505',
-    border: 'rgba(255,255,255,0.08)',
-    text: '#e4e4e7',
-    textMuted: '#71717a',
-    accent: '#f87171',
-    warning: '#fbbf24',
-    info: '#3b82f6',
-    success: '#10b981',
-    chipBg: 'rgba(255,255,255,0.05)',
-    maxWidth: '900px',
+    panel: 'var(--bini-panel)',
+    codeBg: 'var(--bini-code-bg)',
+    border: 'var(--bini-border)',
+    borderStrong: 'var(--bini-border-strong)',
+    text: 'var(--bini-text)',
+    textMuted: 'var(--bini-text-muted)',
+    textDim: 'var(--bini-text-dim)',
+    error: 'var(--bini-error)',
+    link: 'var(--bini-link)',
+    maxWidth: '860px',
+    fontSans: "'Inter Variable', 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+    fontMono: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
   };
+
+  const ICON_THUMB_UP = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>`;
+  const ICON_THUMB_DOWN = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>`;
+  const ICON_EXTERNAL = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
+  const ICON_UPDOWN = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>`;
 
   return {
     name: 'bini-overlay:error',
@@ -1274,280 +1346,555 @@ function biniErrorOverlay(): BiniPlugin {
 
         const overlayHtml = `
 <style>
-  #__bini_error_content {
-    overflow: visible !important;
-    overflow-x: visible !important;
-    overflow-y: visible !important;
-    max-height: none !important;
+  #__bini_root, #__bini_root * { box-sizing: border-box; }
+
+  #__bini_root {
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--bini-backdrop);
+    scrollbar-width: thin;
+    scrollbar-color: var(--bini-root-scroll-thumb) var(--bini-root-scroll-track);
+  }
+  #__bini_root::-webkit-scrollbar { width: 10px; height: 10px; }
+  #__bini_root::-webkit-scrollbar-track { background: var(--bini-root-scroll-track); }
+  #__bini_root::-webkit-scrollbar-thumb {
+    background: var(--bini-root-scroll-thumb);
+    border-radius: 5px;
+    border: 2px solid var(--bini-root-scroll-track);
+  }
+  #__bini_root::-webkit-scrollbar-thumb:hover { background: var(--bini-root-scroll-thumb-hover); }
+
+  #__bini_root {
+    --bini-panel: #0a0a0a;
+    --bini-code-bg: #000000;
+    --bini-code-sep: #b8772a;
+    --bini-border: rgba(255,255,255,0.1);
+    --bini-border-strong: rgba(255,255,255,0.16);
+    --bini-text: #e4e4e7;
+    --bini-text-muted: #a1a1aa;
+    --bini-text-dim: #71717a;
+    --bini-error: #ff7b7b;
+    --bini-link: #5b9dff;
+    --bini-strong: #ffffff;
+    --bini-badge-text: #d4d4d8;
+    --bini-hover: rgba(255,255,255,0.08);
+    --bini-hover-soft: rgba(255,255,255,0.06);
+    --bini-count-bg: #262626;
+    --bini-chip-err-bg: rgba(248,113,113,0.14);
+    --bini-err-mark: #f87171;
+    --bini-err-line: rgba(239,68,68,0.2);
+    --bini-backdrop: rgb(26, 26, 26);
+    --bini-scroll-track: #050505;
+    --bini-scroll-thumb: #3f3f46;
+    --bini-scroll-thumb-hover: #52525b;
+    --bini-root-scroll-track: rgb(26, 26, 26);
+    --bini-root-scroll-thumb: #52525b;
+    --bini-root-scroll-thumb-hover: #71717a;
+  }
+  #__bini_root[data-theme='light'] {
+    --bini-panel: #ffffff;
+    --bini-code-bg: #fafafa;
+    --bini-code-sep: #b45309;
+    --bini-border: rgba(0,0,0,0.1);
+    --bini-border-strong: rgba(0,0,0,0.16);
+    --bini-text: #18181b;
+    --bini-text-muted: #52525b;
+    --bini-text-dim: #71717a;
+    --bini-error: #dc2626;
+    --bini-link: #2563eb;
+    --bini-strong: #09090b;
+    --bini-badge-text: #3f3f46;
+    --bini-hover: rgba(0,0,0,0.06);
+    --bini-hover-soft: rgba(0,0,0,0.04);
+    --bini-count-bg: #f4f4f5;
+    --bini-chip-err-bg: rgba(220,38,38,0.1);
+    --bini-err-mark: #dc2626;
+    --bini-err-line: rgba(220,38,38,0.1);
+    --bini-backdrop: rgb(202, 202, 202);
+    --bini-scroll-track: #f4f4f5;
+    --bini-scroll-thumb: #d4d4d8;
+    --bini-scroll-thumb-hover: #a1a1aa;
+    --bini-root-scroll-track: rgb(202, 202, 202);
+    --bini-root-scroll-thumb: #8f8f95;
+    --bini-root-scroll-thumb-hover: #6b6b72;
   }
 
+  /* The error content scrolls inside the fixed-height card. */
+  #__bini_error_content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--bini-scroll-thumb) var(--bini-panel);
+  }
+  #__bini_error_content::-webkit-scrollbar { width: 10px; height: 10px; }
+  #__bini_error_content::-webkit-scrollbar-track { background: var(--bini-panel); }
+  #__bini_error_content::-webkit-scrollbar-thumb {
+    background: var(--bini-scroll-thumb);
+    border-radius: 5px;
+    border: 2px solid var(--bini-panel);
+  }
+  #__bini_error_content::-webkit-scrollbar-thumb:hover { background: var(--bini-scroll-thumb-hover); }
+
+  .bini-wrap {
+    position: relative;
+    z-index: 2;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: ${theme.maxWidth};
+    margin: 0 auto 8vh auto;
+    /* Total overlay height is capped at 815px (or the viewport, if smaller). */
+    max-height: min(815px, calc(100vh - 16vh));
+  }
+  .bini-topbar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    position: relative;
+    z-index: 3;
+    flex-shrink: 0;
+  }
+  .bini-tab {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    height: 50px;
+    padding: 0 1px 0 16px;
+    margin-bottom: -1px;
+    background: ${theme.panel};
+    border-top: 1px solid ${theme.border};
+    border-left: 1px solid ${theme.border};
+    border-radius: 14px 0 0 0;
+  }
+  .bini-wing {
+    position: absolute;
+    top: -1px;
+    left: calc(100% - 1px);
+    pointer-events: none;
+    overflow: visible;
+  }
+  .bini-wing-fill { fill: var(--bini-panel); }
+  .bini-wing-line { fill: none; stroke: var(--bini-border); stroke-width: 1; }
+  .bini-tab-r .bini-wing {
+    left: auto;
+    right: calc(100% - 1px);
+    transform: scaleX(-1);
+  }
+
+  .bini-pager { display: flex; align-items: center; gap: 4px; }
+  .bini-nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    background: none;
+    border: none;
+    border-radius: 50%;
+    color: ${theme.textMuted};
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .bini-nav-btn:hover { background: var(--bini-hover); color: var(--bini-strong); }
+  .bini-count {
+    min-width: 34px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 500;
+    color: ${theme.text};
+    font-family: ${theme.fontSans};
+  }
+  .bini-count .bini-sep { margin: 0 2px; color: inherit; }
+
+  .bini-tab-r {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 50px;
+    padding: 0 16px 0 1px;
+    margin-bottom: -1px;
+    background: ${theme.panel};
+    border-top: 1px solid ${theme.border};
+    border-right: 1px solid ${theme.border};
+    border-radius: 0 14px 0 0;
+  }
+  .bini-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 13px;
+    background: ${theme.panel};
+    border: 1px solid ${theme.borderStrong};
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--bini-badge-text);
+    font-family: ${theme.fontSans};
+    white-space: nowrap;
+  }
+  .bini-badge-dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: #4ade80;
+  }
+  .bini-badge-grad {
+    background: linear-gradient(90deg, #00cfff, #0077ff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  .bini-panel {
+    position: relative;
+    z-index: 2;
+    background: ${theme.panel};
+    color: ${theme.text};
+    border: 1px solid ${theme.border};
+    border-radius: 0 0 14px 14px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .bini-head {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px 0 24px;
+  }
+  .bini-chip-err {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    background: var(--bini-chip-err-bg);
+    color: ${theme.error};
+    border-radius: 6px;
+    font-family: ${theme.fontMono};
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .bini-actions { display: flex; align-items: center; gap: 8px; }
+  .bini-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: transparent;
+    border: 1px solid ${theme.borderStrong};
+    border-radius: 50%;
+    color: ${theme.text};
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .bini-icon-btn:hover { background: var(--bini-hover); color: var(--bini-strong); }
+  #__bini_close.bini-hidden { display: none !important; }
+
+  .bini-body { padding: 18px 24px 8px 24px; font-family: ${theme.fontSans}; }
+
+  .bini-headline {
+    margin: 0 0 14px 0;
+    font-size: 16px;
+    line-height: 1.45;
+    font-weight: 500;
+    color: ${theme.error};
+    word-break: break-word;
+  }
+  .bini-details {
+    font-size: 13px;
+    line-height: 1.65;
+    color: ${theme.textMuted};
+    word-break: break-word;
+  }
+  .bini-details div { padding: 2px 0; }
+
+  .bini-code {
+    margin: 22px 0 0 0;
+    background: ${theme.codeBg};
+    border: 1px solid ${theme.borderStrong};
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .bini-code-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid ${theme.border};
+    font-family: ${theme.fontSans};
+    font-size: 12px;
+    color: var(--bini-strong);
+  }
+  .bini-code-head .bini-code-file { font-weight: 500; }
+  .bini-code-open {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    color: ${theme.textMuted};
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .bini-code-open:hover { background: var(--bini-hover); color: var(--bini-strong); }
   .bini-code-scroll {
     overflow: auto !important;
     max-height: 400px;
     display: block;
     position: relative;
-  }
-  .bini-code-scroll::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-    display: block;
-  }
-  .bini-code-scroll::-webkit-scrollbar-track {
-    background: ${theme.surfaceMuted};
-    border-radius: 5px;
-    margin: 2px;
-  }
-  .bini-code-scroll::-webkit-scrollbar-thumb {
-    background: #5a5a5a;
-    border-radius: 5px;
-    border: 1px solid ${theme.border};
-  }
-  .bini-code-scroll::-webkit-scrollbar-thumb:hover {
-    background: #7a7a7a;
-  }
-  .bini-code-scroll::-webkit-scrollbar-corner {
-    background: ${theme.surfaceMuted};
-  }
-  .bini-code-scroll {
-    scrollbar-width: auto;
-    scrollbar-color: #5a5a5a ${theme.surfaceMuted};
+    padding: 12px 0 14px 0;
   }
   .bini-code-scroll pre {
     background: transparent !important;
     margin: 0 !important;
     padding: 0 !important;
   }
+  .bini-code-inner { display: inline-block; min-width: 100%; }
+  .bini-code-line { display: flex; padding: 1px 0; }
+  .bini-code-mark {
+    min-width: 30px;
+    padding: 0 6px 0 14px;
+    text-align: right;
+    font-family: ${theme.fontMono};
+    font-size: 12px;
+    line-height: 1.55;
+    font-weight: 700;
+    color: transparent;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .bini-code-line.is-err, .bini-code-line.is-err-caret { background: var(--bini-err-line); }
+  .bini-code-line.is-err .bini-code-mark { color: var(--bini-err-mark); }
+  .bini-code-num {
+    min-width: 22px;
+    padding: 0 10px 0 0;
+    text-align: right;
+    font-family: ${theme.fontMono};
+    font-size: 12px;
+    line-height: 1.55;
+    color: ${theme.textDim};
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .bini-code-line.is-err .bini-code-num { color: var(--bini-strong); font-weight: 600; }
+  .bini-code-sep {
+    padding: 0 16px 0 0;
+    font-family: ${theme.fontMono};
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--bini-code-sep);
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .bini-code-text {
+    flex: 1;
+    padding: 0 16px 0 0;
+    white-space: pre;
+    font-family: ${theme.fontMono};
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .bini-code-caret { color: var(--bini-err-mark); }
 
-  .bini-stack-scroll {
-    max-height: 300px;
-    overflow: auto !important;
+  .bini-stack { margin-top: 28px; }
+  .bini-stack-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .bini-stack-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--bini-strong);
+  }
+  .bini-stack-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 7px;
+    background: var(--bini-count-bg);
+    color: ${theme.text};
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .bini-fw-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    padding: 4px 0;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    color: ${theme.textMuted};
+    transition: color 0.15s;
+  }
+  .bini-fw-toggle:hover { color: var(--bini-strong); }
+
+  .bini-frames { margin-top: 14px; }
+  .bini-frame {
     display: block;
+    width: 100%;
+    padding: 9px 0;
+    background: none;
+    border: none;
+    text-align: left;
+    font-family: inherit;
+    color: inherit;
+    cursor: pointer;
   }
-  .bini-stack-scroll::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+  button.bini-frame:hover .bini-frame-fn { text-decoration: underline; text-underline-offset: 3px; }
+  .bini-frame-fn {
     display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--bini-strong);
   }
-  .bini-stack-scroll::-webkit-scrollbar-track {
-    background: ${theme.surfaceMuted};
-    border-radius: 5px;
-    margin: 2px;
+  .bini-frame-loc {
+    display: block;
+    margin-top: 2px;
+    font-size: 12px;
+    color: ${theme.textDim};
+    word-break: break-all;
   }
-  .bini-stack-scroll::-webkit-scrollbar-thumb {
-    background: #5a5a5a;
-    border-radius: 5px;
-    border: 1px solid ${theme.border};
+  .bini-frame-fw { cursor: default; }
+  .bini-frame-fw .bini-frame-fn { color: ${theme.textMuted}; font-weight: 500; }
+
+  /* Expanded framework frames just grow the panel. No inner scrollbar:
+     the overlay's own scrollbar handles the extra height. */
+  .bini-fw-frames {
+    overflow: hidden;
+    max-height: 0;
+    opacity: 0;
+    transition: max-height 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s;
   }
-  .bini-stack-scroll::-webkit-scrollbar-thumb:hover {
-    background: #7a7a7a;
-  }
-  .bini-stack-scroll::-webkit-scrollbar-corner {
-    background: ${theme.surfaceMuted};
-  }
-  .bini-stack-scroll {
-    scrollbar-width: auto;
-    scrollbar-color: #5a5a5a ${theme.surfaceMuted};
-  }
+  .bini-fw-frames.open { max-height: 6000px; opacity: 1; overflow: hidden; }
+  .bini-empty { padding: 8px 0; color: ${theme.textDim}; font-size: 13px; }
 
   .bini-component-scroll {
     max-height: 200px;
     overflow: auto !important;
-  }
-  .bini-component-scroll::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-    display: block;
-  }
-  .bini-component-scroll::-webkit-scrollbar-track {
-    background: ${theme.surfaceMuted};
-    border-radius: 5px;
-  }
-  .bini-component-scroll::-webkit-scrollbar-thumb {
-    background: #5a5a5a;
-    border-radius: 5px;
-  }
-  .bini-component-scroll {
-    scrollbar-width: auto;
-    scrollbar-color: #5a5a5a ${theme.surfaceMuted};
+    margin-top: 12px;
+    background: ${theme.codeBg};
+    border: 1px solid ${theme.borderStrong};
+    border-radius: 8px;
+    padding: 12px 14px;
   }
 
-  .bini-stack-body {
-    overflow: hidden;
-    transition: max-height 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s;
-    max-height: 400px;
-    opacity: 1;
-  }
-  .bini-stack-body.collapsed {
-    max-height: 0 !important;
-    opacity: 0;
-  }
-  .bini-stack-toggle {
+  .bini-footer {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    cursor: pointer;
-    user-select: none;
-    padding: 0;
-    background: none;
-    border: none;
-    width: 100%;
-    color: inherit;
+    justify-content: flex-end;
+    gap: 14px;
+    flex-shrink: 0;
+    margin-top: 0;
+    padding: 14px 24px;
+    border-top: 1px solid ${theme.border};
+    font-family: ${theme.fontSans};
   }
-  .bini-stack-toggle:hover .bini-stack-toggle-label {
-    color: #e4e4e7;
-  }
-  .bini-stack-toggle-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: #9ca3af;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    transition: color 0.15s;
-  }
-  .bini-stack-chevron {
-    display: flex;
-    align-items: center;
-    color: #6b7280;
-    transition: color 0.15s, transform 0.2s;
-  }
-  .bini-stack-toggle:hover .bini-stack-chevron {
-    color: #9ca3af;
-  }
-
-  #__bini_error_content pre {
-    overflow-x: auto !important;
-    white-space: pre !important;
-    margin: 0;
-    padding: 0;
-  }
-
-  .bini-stack-frame {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 8px 16px;
-    border: none;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
-    background: none;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 12px;
-    color: inherit;
-    transition: background 0.12s;
-  }
-  .bini-stack-frame:hover {
-    background: rgba(255,255,255,0.04);
-  }
-  .bini-stack-frame:last-child {
-    border-bottom: none;
-  }
-
-  .bini-fw-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    user-select: none;
-    padding: 8px 16px;
-    background: none;
-    border: none;
-    border-top: 1px solid rgba(255,255,255,0.06);
-    width: 100%;
-    text-align: left;
-    color: #6b7280;
-    font-family: inherit;
-    font-size: 11px;
-    transition: color 0.15s, background 0.12s;
-  }
-  .bini-fw-toggle:hover {
-    color: #9ca3af;
-    background: rgba(255,255,255,0.02);
-  }
-  .bini-fw-toggle-icon {
+  .bini-footer-text { font-size: 13px; font-weight: 500; color: ${theme.link}; }
+  .bini-thumb {
     display: inline-flex;
     align-items: center;
-    color: inherit;
-    transition: transform 0.2s;
-  }
-  .bini-fw-toggle-icon.open {
-    transform: rotate(90deg);
-  }
-
-  .bini-fw-frames {
-    overflow: hidden;
-    transition: max-height 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s;
-    max-height: 0;
-    opacity: 0;
-  }
-  .bini-fw-frames.open {
-    max-height: 400px;
-    opacity: 1;
-  }
-  .bini-fw-frame {
-    padding: 6px 16px 6px 30px;
-    font-size: 11px;
-    color: #4b5563;
-    border-top: 1px solid rgba(255,255,255,0.03);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  #__bini_close {
-    display: flex;
-    align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
-    background: ${theme.chipBg};
-    border: 1px solid ${theme.border};
-    border-radius: 8px;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    color: ${theme.textMuted};
     cursor: pointer;
-    color: ${theme.text};
-    transition: all 0.2s;
+    transition: color 0.2s ease, background-color 0.2s ease, transform 0.12s ease;
   }
-  #__bini_close:hover {
-    background: rgba(255,255,255,0.1);
-    color: #fff;
+  .bini-thumb svg { fill: transparent; transition: fill 0.22s ease; }
+  .bini-thumb:hover { background: var(--bini-hover-soft); color: var(--bini-strong); }
+  .bini-thumb:active { transform: scale(0.94); }
+  .bini-thumb.is-up, .bini-thumb.is-up:hover { color: #3b82f6; }
+  .bini-thumb.is-up svg { fill: #3b82f6; }
+  .bini-thumb.is-down, .bini-thumb.is-down:hover { color: #ef4444; }
+  .bini-thumb.is-down svg { fill: #ef4444; }
+  @media (prefers-reduced-motion: reduce) {
+    .bini-thumb, .bini-thumb svg { transition: none; }
   }
-  #__bini_close.bini-hidden {
-    display: none !important;
+
+  .bini-code-scroll::-webkit-scrollbar,
+  .bini-component-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+  .bini-code-scroll::-webkit-scrollbar-track,
+  .bini-component-scroll::-webkit-scrollbar-track { background: var(--bini-scroll-track); }
+  .bini-code-scroll::-webkit-scrollbar-thumb,
+  .bini-component-scroll::-webkit-scrollbar-thumb { background: var(--bini-scroll-thumb); border-radius: 5px; }
+  .bini-code-scroll::-webkit-scrollbar-thumb:hover { background: var(--bini-scroll-thumb-hover); }
+  .bini-code-scroll, .bini-component-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--bini-scroll-thumb) var(--bini-scroll-track);
   }
 </style>
-<div id="__bini_root" style="position:fixed;inset:0;z-index:2147483646;display:flex;flex-direction:column;align-items:center;padding-top:10vh;padding-left:15px;padding-right:15px;background:${theme.bg};font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;display:none;">
-  <div id="__bini_backdrop" style="position:fixed;inset:0;z-index:-1;background:${theme.bg};"></div>
+<div id="__bini_root" style="position:fixed;inset:0;z-index:2147483646;display:flex;flex-direction:column;align-items:center;padding:8vh 16px 0 16px;font-family:${theme.fontSans};display:none;">
+  <div id="__bini_backdrop" style="position:fixed;inset:0;z-index:-1;background:var(--bini-backdrop);"></div>
 
-  <div style="position:relative;z-index:2;display:flex;width:100%;max-width:${theme.maxWidth};align-items:flex-end;justify-content:space-between;">
-    <div style="display:flex;gap:8px;background:${theme.surface};padding:12px 16px;border-radius:16px 16px 0 0;border:1.5px solid ${theme.border};border-bottom:none;box-shadow:0 -2px 10px rgba(0,0,0,0.3);">
-      <button id="__bini_prev" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:${theme.chipBg};border-radius:8px;border:1px solid ${theme.border};cursor:pointer;color:${theme.text};transition:all 0.2s;">${PREV_ICON}</button>
-      <div style="display:inline-flex;align-items:center;justify-content:center;min-width:48px;height:32px;color:${theme.text};font-size:13px;background:${theme.chipBg};border-radius:8px;padding:0 12px;border:1px solid ${theme.border};">
-        <span id="__bini_current">1</span>
-        <span style="margin:0 4px;">/</span>
-        <span id="__bini_total">1</span>
+  <div class="bini-wrap">
+    <div class="bini-topbar">
+      <div class="bini-tab">
+        <div class="bini-pager">
+          <button id="__bini_prev" class="bini-nav-btn" title="Previous">${PREV_ICON}</button>
+          <span class="bini-count"><span id="__bini_current">1</span><span class="bini-sep">/</span><span id="__bini_total">1</span></span>
+          <button id="__bini_next" class="bini-nav-btn" title="Next">${NEXT_ICON}</button>
+        </div>
+        <svg class="bini-wing" viewBox="0 0 39 50" width="39" height="50" aria-hidden="true"><path class="bini-wing-fill" d="M0 0H4.2C9.1 0 11.9 2.2 13.7 7.5C16.5 16 19.6 33 22.4 42C24.5 48 28.7 50 39 50H0Z"/><path class="bini-wing-line" d="M0 .5H4.2C9.1 .5 12 2.7 13.7 8C16.5 16.4 19.6 33.4 22.4 42.2C24.5 48.2 28.7 49.5 39 49.5"/></svg>
       </div>
-      <button id="__bini_next" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:${theme.chipBg};border-radius:8px;border:1px solid ${theme.border};cursor:pointer;color:${theme.text};transition:all 0.2s;">${NEXT_ICON}</button>
+      <div class="bini-tab-r">
+        <svg class="bini-wing" viewBox="0 0 39 50" width="39" height="50" aria-hidden="true"><path class="bini-wing-fill" d="M0 0H4.2C9.1 0 11.9 2.2 13.7 7.5C16.5 16 19.6 33 22.4 42C24.5 48 28.7 50 39 50H0Z"/><path class="bini-wing-line" d="M0 .5H4.2C9.1 .5 12 2.7 13.7 8C16.5 16.4 19.6 33.4 22.4 42.2C24.5 48.2 28.7 49.5 39 49.5"/></svg>
+        <div class="bini-badge">
+          <span class="bini-badge-dot"></span>
+          <span>Bini.js</span>
+          <span class="bini-badge-grad">Rolldown</span>
+        </div>
+      </div>
     </div>
-    <div style="display:flex;align-items:center;background:${theme.surface};padding:12px 24px;border-radius:16px 16px 0 0;border:1.5px solid ${theme.border};border-bottom:none;box-shadow:0 -2px 10px rgba(0,0,0,0.3);">
-      <span style="font-size:15px;font-weight:600;letter-spacing:0.5px;">
-        <span style="color:#e4e4e7;">Bini.js</span>
-        <span style="color:${theme.textMuted};margin:0 6px;font-weight:400;">·</span>
-        <span style="color:#e4e4e7;font-weight:700;">Rolldown</span>
-      </span>
-    </div>
-  </div>
 
-  <div style="position:relative;z-index:10;display:flex;width:100%;max-width:${theme.maxWidth};flex-direction:column;overflow:visible;border-radius:0 0 16px 16px;background:${theme.surface};color:${theme.text};box-shadow:0 8px 30px rgba(0,0,0,0.6);border:1.5px solid ${theme.border};border-top:none;">
-    <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid ${theme.border};background:${theme.surface};padding:14px 20px;">
-      <div style="display:flex;align-items:center;gap:12px;flex:1;">
-        <span id="__bini_heading" style="color:${theme.accent};font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;font-size:12px;background:rgba(248,113,113,0.12);padding:4px 12px;border-radius:20px;border:1px solid rgba(248,113,113,0.25);white-space:nowrap;"></span>
-        <span id="__bini_file_info" style="font-size:11px;font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;color:${theme.info};background:rgba(59,130,246,0.1);padding:4px 8px;border-radius:6px;border:1px solid rgba(59,130,246,0.2);"></span>
+    <div class="bini-panel">
+      <div class="bini-head">
+        <span id="__bini_heading" class="bini-chip-err"></span>
+        <div class="bini-actions">
+          <button id="__bini_copy" class="bini-icon-btn" title="Copy error">${COPY_ICON}</button>
+          <button id="__bini_close" class="bini-icon-btn" title="Close overlay">${CLOSE_ICON}</button>
+        </div>
       </div>
-      <div style="display:flex;gap:8px;">
-        <button id="__bini_copy" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:${theme.chipBg};border:1px solid ${theme.border};border-radius:8px;cursor:pointer;color:${theme.text};transition:all 0.2s;">${COPY_ICON}</button>
-        <button id="__bini_close" title="Close overlay">${CLOSE_ICON}</button>
+
+      <div id="__bini_error_content" class="bini-body"></div>
+
+      <div class="bini-footer">
+        <span class="bini-footer-text">Was this helpful?</span>
+        <button id="__bini_thumb_up" class="bini-thumb" title="Helpful" aria-label="Helpful" aria-pressed="false">${ICON_THUMB_UP}</button>
+        <button id="__bini_thumb_down" class="bini-thumb" title="Not helpful" aria-label="Not helpful" aria-pressed="false">${ICON_THUMB_DOWN}</button>
       </div>
-    </div>
-    <div id="__bini_error_content" style="padding:24px;font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;">
     </div>
   </div>
 </div>`;
@@ -1563,12 +1910,78 @@ function biniErrorOverlay(): BiniPlugin {
   var shikiHighlighter = null;
   var shikiLoadPromise = null;
   var filteredCount = 0;
-  var stackCollapsedState = {};
   var frameworkFramesOpenState = {};
+  var feedbackState = {};
+
+  var PREFS_KEY = 'bini-overlay:prefs';
+  function getThemePref() {
+    try {
+      var raw = localStorage.getItem(PREFS_KEY);
+      if (raw) {
+        var p = JSON.parse(raw);
+        if (p && p.theme) return p.theme;
+      }
+    } catch (_e) {}
+    return 'system';
+  }
+  function resolveOverlayTheme() {
+    var t = getThemePref();
+    if (t === 'light' || t === 'dark') return t;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+  }
+  function shikiThemeName() {
+    return resolveOverlayTheme() === 'light' ? 'light-plus' : 'dark-plus';
+  }
+  function applyOverlayTheme() {
+    if (overlayRoot) overlayRoot.setAttribute('data-theme', resolveOverlayTheme());
+  }
+  function onThemeChange() {
+    applyOverlayTheme();
+    var err = errors[currentIndex];
+    if (!err || !overlayRoot) return;
+    errors.forEach(function (e) { e.highlightedLines = null; });
+    prepareHighlights(err).then(function () {
+      if (overlayRoot && overlayRoot.style.display !== 'none') render();
+    });
+  }
+  window.addEventListener('__bini_theme__', onThemeChange);
+  if (window.matchMedia) {
+    try {
+      window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', onThemeChange);
+    } catch (_e) {}
+  }
 
   var _errorHandler = null;
   var _rejectionHandler = null;
   var _biniErrorHandler = null;
+
+  var UPDOWN_SVG = '${ICON_UPDOWN}';
+  var EXTERNAL_SVG = '${ICON_EXTERNAL}';
+
+  var ICON_REACT = ${JSON.stringify(ICON_REACT)};
+  var ICON_TYPESCRIPT = ${JSON.stringify(ICON_TYPESCRIPT)};
+  var ICON_JAVASCRIPT = ${JSON.stringify(ICON_JAVASCRIPT)};
+
+  function fileIconPathFor(filename) {
+    if (!filename) return null;
+    var f = String(filename).toLowerCase();
+    if (/\\.(tsx|jsx)$/.test(f)) return ICON_REACT;
+    if (/\\.ts$/.test(f)) return ICON_TYPESCRIPT;
+    if (/\\.js$/.test(f)) return ICON_JAVASCRIPT;
+    return null;
+  }
+
+  function fileIconSvg(filename, size) {
+    var d = fileIconPathFor(filename);
+    if (!d) return '';
+    return '<svg role="img" viewBox="0 0 24 24" width="' + size + '" height="' + size + '" fill="currentColor" style="flex-shrink:0;color:var(--bini-strong);"><path d="' + d + '"/></svg>';
+  }
+
+  function parseCodeLine(cl) {
+    var m = /^\\s*(>>>)?\\s*(\\d+): ?([\\s\\S]*)$/.exec(cl || '');
+    if (!m) return { isErr: false, num: '', code: String(cl || '') };
+    return { isErr: !!m[1], num: m[2], code: m[3].replace(/\\r$/, '') };
+  }
 
   function isSourcemappableUrl(url) {
     if (!url) return false;
@@ -1743,12 +2156,12 @@ function biniErrorOverlay(): BiniPlugin {
   }
 
   function fallbackCodeHtml(code) {
-    return "<pre style='margin:0;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;'><code>" + escapeHtml(code) + "</code></pre>";
+    return "<pre style='margin:0;font-family:${theme.fontMono};'><code>" + escapeHtml(code) + "</code></pre>";
   }
 
   function highlightCode(code, lang) {
     if (shikiHighlighter && shikiHighlighter.codeToHtml) {
-      return shikiHighlighter.codeToHtml(code, { lang: lang || "javascript", theme: "${shikiTheme}" }).catch(function () {
+      return shikiHighlighter.codeToHtml(code, { lang: lang || "javascript", theme: shikiThemeName() }).catch(function () {
         return null;
       });
     }
@@ -1761,9 +2174,7 @@ function biniErrorOverlay(): BiniPlugin {
     return loadShiki().then(function () {
       if (!shikiHighlighter) return;
       var codes = err.codeLines.map(function (cl) {
-        var clNumMatch = cl.match(/(\\d+):/);
-        var clCode = clNumMatch ? cl.substring(cl.indexOf(':') + 1).trim() : cl;
-        return clCode.replace(/^>>>\\s*/, "");
+        return parseCodeLine(cl).code;
       });
       return Promise.all(codes.map(function (code) { return highlightCode(code, lang); })).then(function (results) {
         err.highlightedLines = results;
@@ -1771,93 +2182,116 @@ function biniErrorOverlay(): BiniPlugin {
     }).catch(function () {});
   }
 
-  var CHEVRON_UP_SVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M3.93945 10.5001L4.46978 9.96978L8.00011 6.44011L11.5304 9.96978L12.0608 10.5001L13.0001 9.43945L12.4698 8.90912L8.53044 4.96978C8.23756 4.67689 7.76267 4.67689 7.46978 4.96978L3.53044 8.90912L3.00011 9.43945L3.93945 10.5001Z" fill="currentColor"/></svg>';
-  var CHEVRON_DOWN_SVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M12.0608 5.50011L11.5304 6.03044L8.00011 9.56011L4.46978 6.03044L3.93945 5.50011L3.00011 6.56078L3.53044 7.09111L7.46978 11.0304C7.76267 11.3233 8.23756 11.3233 8.53044 11.0304L12.4698 7.09111L13.0001 6.56078L12.0608 5.50011Z" fill="currentColor"/></svg>';
-  var CHEVRON_RIGHT_SMALL = '<svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.75011 3.93945L7.28044 4.46978L10.1037 7.29301C10.4942 7.68353 10.4942 8.3167 10.1037 8.70722L7.28044 11.5304L6.75011 12.0608L5.68945 11.0001L6.21978 10.4698L8.68945 8.00011L6.21978 5.53044L5.68945 5.00011L6.75011 3.93945Z" fill="currentColor"/></svg>';
-
-  function renderFrameButton(f, opts) {
-    var isFramework = opts && opts.framework;
-    var attrs = '';
+  function renderFrame(f, isFramework) {
+    var fn = escapeHtml(f.fn || '<anonymous>');
+    var loc = escapeHtml(f.file || 'unknown') + " (" + escapeHtml(f.line || '0') + ":" + escapeHtml(f.originalColumn || f.column || '0') + ")";
     if (isFramework) {
-      attrs = 'class="bini-fw-frame"';
-      return "<div " + attrs + ">" +
-        escapeHtml(f.fn || '<anonymous>') + " " +
-        escapeHtml(f.file) + ":" + escapeHtml(f.line) +
+      return "<div class='bini-frame bini-frame-fw'>" +
+        "<span class='bini-frame-fn'>" + fn + "</span>" +
+        "<span class='bini-frame-loc'>" + loc + "</span>" +
         "</div>";
     }
-    return "<button class='bini-stack-frame' " +
+    return "<button class='bini-frame' " +
            "data-file='" + escapeHtml(f.file) + "' " +
            "data-line='" + escapeHtml(f.line) + "' " +
-           "onclick='window.__bini_open_editor(this.getAttribute(\\"data-file\\"), this.getAttribute(\\"data-line\\"))'>" +
-           "<span style='color:#60a5fa;'>" + escapeHtml(f.fn || '<anonymous>') + "</span>" +
-           "<span style='color:#6b7280;'> </span>" +
-           "<span style='color:#10b981;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;'>" + escapeHtml(f.file) + "</span>" +
-           "<span style='color:#6b7280;'>:</span><span style='color:#fbbf24;'>" + f.line + "</span>" +
+           "data-column='" + escapeHtml(f.originalColumn || f.column || '1') + "' " +
+           "onclick='window.__bini_open_editor(this.getAttribute(\\"data-file\\"), this.getAttribute(\\"data-line\\"), this.getAttribute(\\"data-column\\"))'>" +
+           "<span class='bini-frame-fn'>" + fn + "</span>" +
+           "<span class='bini-frame-loc'>" + loc + "</span>" +
            "</button>";
   }
 
-  function formatErrorMessage(message, codeLines, fileLang, stack, err, errIndex) {
-    var lang = fileLang || "javascript";
+  function splitMessage(message) {
     var cleanMsg = cleanErrorMessage(message);
-    var lines = cleanMsg.split("\\n");
-    var html = "<div style='font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.6;'>";
+    var rawLines = cleanMsg.split("\\n");
+    var headline = '';
+    var details = [];
 
-    if (err && err.plugin) {
-      var pluginName = err.plugin;
-      pluginName = pluginName.replace(/^vite:/, '').replace(/^vite\\\\x00/, '').replace(/\\x00/g, '');
-      if (pluginName && pluginName !== 'oxc') {
-        html += "<div style='display:flex;align-items:center;gap:8px;margin-bottom:16px;'>";
-        html += "<span style='color:#6b7280;font-size:11px;'>" + escapeHtml(pluginName) + "</span>";
-        html += "</div>";
-      }
-    }
-
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      if (!line || line === 'vite:oxc' || line.includes('vite:oxc')) continue;
+    for (var i = 0; i < rawLines.length; i++) {
+      var line = rawLines[i];
+      if (!line || !line.trim()) continue;
+      if (line.includes('vite:oxc')) continue;
       if (line.includes('NextJs') || line.includes('Turbopack')) continue;
       if (line.includes('╭─[') || line.includes('────╯')) continue;
+      if (line.match(/^\\s*[│|]/) || line.match(/^\\s*\\d+\\s*[│|]/)) continue;
 
       var errorMatch = line.match(/^\\[([^\\]]+)\\]\\s*(.+)$/);
-      if (errorMatch) {
-        var cleanErrorMsg = stripNonAscii(errorMatch[2]);
-        html += "<div style='background:rgba(248,113,113,0.08);padding:16px;border-radius:8px;margin:8px 0;'>";
-        html += "<div style='color:#f87171;font-weight:600;margin-bottom:8px;'>" + escapeHtml(errorMatch[1]) + "</div>";
-        html += "<div style='color:#e4e4e7;font-size:14px;'>" + escapeHtml(cleanErrorMsg) + "</div>";
-        html += "</div>";
-        continue;
+      var text = errorMatch
+        ? stripNonAscii(errorMatch[2])
+        : stripNonAscii(line);
+      if (!text) continue;
+
+      if (!headline) headline = text;
+      else details.push(text);
+    }
+    return { headline: headline, details: details };
+  }
+
+  function formatErrorMessage(message, codeLines, fileLang, stack, err, errIndex) {
+    var parts = splitMessage(message);
+    var headline = parts.headline;
+    var details = parts.details;
+
+    var html = "<div>";
+
+    if (headline) {
+      html += "<div class='bini-headline'>" + escapeHtml(headline) + "</div>";
+    }
+    if (details.length) {
+      html += "<div class='bini-details'>";
+      for (var d = 0; d < details.length; d++) {
+        html += "<div>" + escapeHtml(details[d]) + "</div>";
       }
-      if (line.match(/Transform failed/)) {
-        html += "<div style='color:#f97316;font-weight:500;padding:8px 0;'>" + escapeHtml(line) + "</div>";
-        continue;
-      }
-      if (line.trim() && !line.match(/^\\s*[│|]/) && !line.match(/^\\s*\\d+\\s*[│|]/)) {
-        html += "<div style='color:#9ca3af;padding:2px 0;'>" + escapeHtml(stripNonAscii(line)) + "</div>";
-      }
+      html += "</div>";
     }
 
     if (codeLines && codeLines.length > 0) {
-      html += "<div style='margin:16px 0;border:1.5px solid rgba(255,255,255,0.08);border-radius:12px;overflow:hidden;background:#050505;'>";
-      html += "<div style='background:#0a0a0a;padding:8px 16px;border-bottom:1.5px solid rgba(255,255,255,0.08);font-size:11px;color:#9ca3af;font-weight:500;display:flex;align-items:center;justify-content:space-between;'>";
-      html += "<span style='background:rgba(255,255,255,0.05);padding:2px 8px;border-radius:4px;'>" + lang.toUpperCase() + "</span>";
-      if (err && err.file && err.line) {
-        html += "<span style='color:#6b7280;'>" + escapeHtml(shortenPath(err.file)) + ":" + err.line + "</span>";
+      var rawFile = (err && err.file) ? shortenPath(err.file) : '';
+      var codeFilename = rawFile || 'source';
+      var posText = '';
+      if (err && err.line) posText = ' (' + err.line + ':' + (err.column || 0) + ')';
+
+      html += "<div class='bini-code'>";
+      html += "<div class='bini-code-head'>";
+      html += fileIconSvg(codeFilename, 16);
+      html += "<span class='bini-code-file'>" + escapeHtml(codeFilename + posText) + "</span>";
+      if (err && err.file) {
+        html += "<button class='bini-code-open' title='Open in editor' aria-label='Open in editor' " +
+          "data-file='" + escapeHtml(rawFile) + "' " +
+          "data-line='" + escapeHtml(err.line || '1') + "' " +
+          "data-column='" + escapeHtml(err.column || '1') + "' " +
+          "onclick='window.__bini_open_editor(this.getAttribute(\\"data-file\\"), this.getAttribute(\\"data-line\\"), this.getAttribute(\\"data-column\\"))'>" +
+          EXTERNAL_SVG + "</button>";
       }
       html += "</div>";
+
       html += "<div class='bini-code-scroll'>";
-      html += "<div style='display:inline-block;min-width:100%;padding:12px 0;'>";
+      html += "<div class='bini-code-inner'>";
+      var numDigits = 1;
+      for (var q = 0; q < codeLines.length; q++) {
+        var qn = parseCodeLine(codeLines[q]).num;
+        if (qn.length > numDigits) numDigits = qn.length;
+      }
+      var numStyle = " style='min-width:calc(" + numDigits + "ch + 10px);'";
       for (var k = 0; k < codeLines.length; k++) {
-        var cl = codeLines[k];
-        var isErr = cl.includes('>>>');
-        var clNumMatch = cl.match(/(\\d+):/);
-        var clNum = clNumMatch ? clNumMatch[1] : "";
-        var clCode = clNumMatch ? cl.substring(cl.indexOf(':') + 1).trim() : cl;
-        clCode = clCode.replace(/^>>>\\s*/, "");
-        var clHtml = (err && err.highlightedLines && err.highlightedLines[k]) ? err.highlightedLines[k] : fallbackCodeHtml(clCode);
-        html += "<div style='display:flex;padding:2px 0;" + (isErr ? "background:rgba(239,68,68,0.08);" : "") + "'>";
-        html += "<span style='min-width:55px;padding:0 12px;text-align:right;color:" + (isErr ? "#f87171" : "#6b7280") + ";user-select:none;font-size:11px;font-weight:500;flex-shrink:0;'>" + clNum + "</span>";
-        html += "<div style='flex:1;padding:0 12px 0 0;white-space:pre;font-family:\\"SF Mono\\",\\"Fira Code\\",\\"Fira Mono\\",\\"Roboto Mono\\",monospace;font-size:13px;line-height:1.5;'>" + clHtml + "</div>";
+        var pl = parseCodeLine(codeLines[k]);
+        var clHtml = (err && err.highlightedLines && err.highlightedLines[k]) ? err.highlightedLines[k] : fallbackCodeHtml(pl.code);
+
+        html += "<div class='bini-code-line" + (pl.isErr ? " is-err" : "") + "'>";
+        html += "<span class='bini-code-mark'>" + (pl.isErr ? "&gt;" : "") + "</span>";
+        html += "<span class='bini-code-num'" + numStyle + ">" + pl.num + "</span>";
+        html += "<span class='bini-code-sep'>|</span>";
+        html += "<div class='bini-code-text'>" + clHtml + "</div>";
         html += "</div>";
+
+        if (pl.isErr && err && err.column && err.column > 0) {
+          html += "<div class='bini-code-line is-err-caret'>" +
+            "<span class='bini-code-mark'></span>" +
+            "<span class='bini-code-num'" + numStyle + "></span>" +
+            "<span class='bini-code-sep'>|</span>" +
+            "<div class='bini-code-text bini-code-caret'>" + escapeHtml(new Array(err.column).join(' ') + '^') + "</div>" +
+            "</div>";
+        }
       }
       html += "</div></div>";
       html += "</div>";
@@ -1865,56 +2299,57 @@ function biniErrorOverlay(): BiniPlugin {
 
     var parsed = parseStack(stack);
     var userFrames = parsed.user;
+    if (!userFrames.length && err && err.file && err.line) {
+      userFrames = [{
+        fn: errorTypeOf(err),
+        file: shortenPath(err.file),
+        line: String(err.line),
+        column: err.column || 0,
+        originalColumn: err.column || 0,
+      }];
+    }
     var frameworkFrames = parsed.framework;
     var totalFrames = userFrames.length + frameworkFrames.length;
 
     if (totalFrames > 0) {
-      var isCollapsed = stackCollapsedState[errIndex] === true;
-      var bodyClass = isCollapsed ? "bini-stack-body collapsed" : "bini-stack-body";
-      var chevronIcon = isCollapsed ? CHEVRON_DOWN_SVG : CHEVRON_UP_SVG;
+      var fwOpen = frameworkFramesOpenState[errIndex] === true;
 
-      html += "<div style='margin-top:20px;' id='bini-stack-section-" + errIndex + "'>";
-      html += "<button class='bini-stack-toggle' id='bini-stack-toggle-" + errIndex + "' style='margin-bottom:12px;' onclick='window.__bini_toggle_stack(" + errIndex + ")'>";
-      html += "<span class='bini-stack-toggle-label'>Call Stack</span>";
-      html += "<span class='bini-stack-chevron' id='bini-stack-chevron-" + errIndex + "'>" + chevronIcon + "</span>";
-      html += "</button>";
-      html += "<div class='" + bodyClass + "' id='bini-stack-body-" + errIndex + "'>";
-      html += "<div class='bini-stack-scroll' style='background:#0a0a0a;border:1.5px solid rgba(255,255,255,0.08);border-radius:8px;'>";
+      html += "<div class='bini-stack'>";
+      html += "<div class='bini-stack-head'>";
+      html += "<div class='bini-stack-title'><span>Call Stack</span><span class='bini-stack-count'>" + totalFrames + "</span></div>";
+      if (frameworkFrames.length > 0) {
+        html += "<button class='bini-fw-toggle' onclick='window.__bini_toggle_framework_frames(" + errIndex + ")'>" +
+          "<span id='bini-fw-label-" + errIndex + "'>" + (fwOpen ? "Hide " : "Show ") + frameworkFrames.length + " ignore-listed frame(s)</span>" +
+          UPDOWN_SVG +
+          "</button>";
+      }
+      html += "</div>";
 
+      html += "<div class='bini-frames'>";
       if (userFrames.length > 0) {
         for (var j = 0; j < userFrames.length; j++) {
-          html += renderFrameButton(userFrames[j], { framework: false });
+          html += renderFrame(userFrames[j], false);
         }
       } else {
-        html += "<div style='padding:12px 16px;color:#6b7280;font-size:11px;'>No application frames in this stack.</div>";
+        html += "<div class='bini-empty'>No application frames in this stack.</div>";
       }
 
       if (frameworkFrames.length > 0) {
-        var fwOpen = frameworkFramesOpenState[errIndex] === true;
-        var fwIconOpenClass = fwOpen ? 'bini-fw-toggle-icon open' : 'bini-fw-toggle-icon';
-        var fwFramesClass = fwOpen ? 'bini-fw-frames open' : 'bini-fw-frames';
-
-        html += "<button class='bini-fw-toggle' onclick='window.__bini_toggle_framework_frames(" + errIndex + ")'>";
-        html += "<span class='" + fwIconOpenClass + "' id='bini-fw-icon-" + errIndex + "'>" + CHEVRON_RIGHT_SMALL + "</span>";
-        html += "<span id='bini-fw-label-" + errIndex + "'>" + frameworkFrames.length + " framework frame" + (frameworkFrames.length === 1 ? "" : "s") + " hidden</span>";
-        html += "</button>";
-        html += "<div class='" + fwFramesClass + "' id='bini-fw-frames-" + errIndex + "'>";
+        html += "<div class='bini-fw-frames" + (fwOpen ? " open" : "") + "' id='bini-fw-frames-" + errIndex + "'>";
         for (var m = 0; m < frameworkFrames.length; m++) {
-          html += renderFrameButton(frameworkFrames[m], { framework: true });
+          html += renderFrame(frameworkFrames[m], true);
         }
         html += "</div>";
       }
-
-      html += "</div>";
       html += "</div>";
       html += "</div>";
     }
 
     if (err && err.componentStack) {
-      html += "<div style='margin-top:20px;'>";
-      html += "<div style='font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;'>Component Stack</div>";
-      html += "<div class='bini-component-scroll' style='background:#0a0a0a;border:1.5px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;'>";
-      html += "<pre style='margin:0;color:#9ca3af;font-size:11px;white-space:pre-wrap;word-break:break-all;'>" + escapeHtml(err.componentStack) + "</pre>";
+      html += "<div class='bini-stack'>";
+      html += "<div class='bini-stack-head'><div class='bini-stack-title'><span>Component Stack</span></div></div>";
+      html += "<div class='bini-component-scroll'>";
+      html += "<pre style='margin:0;color:var(--bini-text-muted);font-family:${theme.fontMono};font-size:11px;white-space:pre-wrap;word-break:break-all;'>" + escapeHtml(err.componentStack) + "</pre>";
       html += "</div></div>";
     }
 
@@ -1929,42 +2364,25 @@ function biniErrorOverlay(): BiniPlugin {
     }
   }
 
-  window.__bini_toggle_stack = function(errIndex) {
-    stackCollapsedState[errIndex] = !stackCollapsedState[errIndex];
-    var body = document.getElementById("bini-stack-body-" + errIndex);
-    var chevron = document.getElementById("bini-stack-chevron-" + errIndex);
-    if (body) {
-      if (stackCollapsedState[errIndex]) {
-        body.classList.add("collapsed");
-        if (chevron) chevron.innerHTML = '${CHEVRON_DOWN.replace(/'/g, "\\'")}';
-      } else {
-        body.classList.remove("collapsed");
-        if (chevron) chevron.innerHTML = '${CHEVRON_UP.replace(/'/g, "\\'")}';
-      }
-    }
-  };
-
   window.__bini_toggle_framework_frames = function(errIndex) {
     frameworkFramesOpenState[errIndex] = !frameworkFramesOpenState[errIndex];
+    var open = frameworkFramesOpenState[errIndex];
     var framesEl = document.getElementById("bini-fw-frames-" + errIndex);
-    var iconEl = document.getElementById("bini-fw-icon-" + errIndex);
     var labelEl = document.getElementById("bini-fw-label-" + errIndex);
     if (framesEl) {
-      if (frameworkFramesOpenState[errIndex]) {
-        framesEl.classList.add("open");
-        if (iconEl) iconEl.classList.add("open");
-        if (labelEl) labelEl.textContent = labelEl.textContent.replace("hidden", "shown");
-      } else {
-        framesEl.classList.remove("open");
-        if (iconEl) iconEl.classList.remove("open");
-        if (labelEl) labelEl.textContent = labelEl.textContent.replace("shown", "hidden");
-      }
+      if (open) framesEl.classList.add("open");
+      else framesEl.classList.remove("open");
+    }
+    if (labelEl) {
+      labelEl.textContent = open
+        ? labelEl.textContent.replace("Show", "Hide")
+        : labelEl.textContent.replace("Hide", "Show");
     }
   };
 
-  window.__bini_open_editor = function(file, line) {
+  window.__bini_open_editor = function(file, line, column) {
     if (!file) return;
-    fetch('/__bini_open_editor?file=' + encodeURIComponent(file) + '&line=' + encodeURIComponent(line || '1'))
+    fetch('/__bini_open_editor?file=' + encodeURIComponent(file) + '&line=' + encodeURIComponent(line || '1') + '&column=' + encodeURIComponent(column || '1'))
       .catch(function () {});
   };
 
@@ -2010,6 +2428,7 @@ function biniErrorOverlay(): BiniPlugin {
     container.innerHTML = \`${overlayHtml}\`;
     document.body.appendChild(container);
     overlayRoot = container.querySelector("#__bini_root");
+    applyOverlayTheme();
 
     var copyBtn = document.getElementById("__bini_copy");
     var originalIcon = copyBtn.innerHTML;
@@ -2032,6 +2451,11 @@ function biniErrorOverlay(): BiniPlugin {
       });
     }
 
+    var thumbUp = document.getElementById("__bini_thumb_up");
+    var thumbDown = document.getElementById("__bini_thumb_down");
+    if (thumbUp) thumbUp.addEventListener("click", function() { setFeedback("up"); });
+    if (thumbDown) thumbDown.addEventListener("click", function() { setFeedback("down"); });
+
     document.getElementById("__bini_prev").addEventListener("click", function() {
       currentIndex = Math.max(0, currentIndex - 1);
       render();
@@ -2040,6 +2464,29 @@ function biniErrorOverlay(): BiniPlugin {
       currentIndex = Math.min(errors.length - 1, currentIndex + 1);
       render();
     });
+  }
+
+  function applyFeedback() {
+    var err = errors[currentIndex];
+    var v = err ? feedbackState[getErrorKey(err)] : null;
+    var up = document.getElementById("__bini_thumb_up");
+    var down = document.getElementById("__bini_thumb_down");
+    if (up) {
+      up.classList.toggle("is-up", v === "up");
+      up.setAttribute("aria-pressed", v === "up" ? "true" : "false");
+    }
+    if (down) {
+      down.classList.toggle("is-down", v === "down");
+      down.setAttribute("aria-pressed", v === "down" ? "true" : "false");
+    }
+  }
+
+  function setFeedback(val) {
+    var err = errors[currentIndex];
+    if (!err) return;
+    var key = getErrorKey(err);
+    feedbackState[key] = feedbackState[key] === val ? null : val;
+    applyFeedback();
   }
 
   function show() {
@@ -2051,6 +2498,18 @@ function biniErrorOverlay(): BiniPlugin {
     if (overlayRoot) overlayRoot.style.display = "none";
   }
 
+  function errorTypeOf(err) {
+    var msg = err.originalMessage || err.message || "";
+    if (err._type === 'runtime') return "Runtime Error";
+    if (err.name === "Unhandled Rejection") return "Unhandled Rejection";
+    if (msg.match(/SyntaxError|PARSE_ERROR|Unexpected token|Expected/i)) return "Parse Error";
+    if (msg.match(/Transform failed|Build failed/i)) return "Build Error";
+    if (msg.match(/TypeError/i) || err.name === "TypeError") return "Type Error";
+    if (msg.match(/Element type is invalid|Cannot read|is not a function|is not defined/i)) return "Runtime Error";
+    if (err.name && err.name !== "Plugin Error" && err.name !== "Vite Error") return err.name;
+    return "Build Error";
+  }
+
   function render() {
     var err = errors[currentIndex];
     if (!err || !overlayRoot) return;
@@ -2059,33 +2518,7 @@ function biniErrorOverlay(): BiniPlugin {
 
     var headingEl = document.getElementById("__bini_heading");
     if (headingEl) {
-      var errorType;
-      var msg = cleanMessage || "";
-      if (err._type === 'runtime') {
-        errorType = "Runtime Error";
-      } else if (err.name === "Unhandled Rejection") {
-        errorType = "Unhandled Rejection";
-      } else if (msg.match(/SyntaxError|PARSE_ERROR|Unexpected token|Expected/i)) {
-        errorType = "Parse Error";
-      } else if (msg.match(/Transform failed|Build failed/i)) {
-        errorType = "Build Error";
-      } else if (msg.match(/TypeError/i) || (err.name === "TypeError")) {
-        errorType = "Type Error";
-      } else if (msg.match(/Element type is invalid|Cannot read|is not a function|is not defined/i)) {
-        errorType = "Runtime Error";
-      } else if (err.name && err.name !== "Plugin Error" && err.name !== "Vite Error") {
-        errorType = err.name;
-      } else {
-        errorType = "Build Error";
-      }
-      headingEl.textContent = errorType;
-    }
-
-    var fileInfoEl = document.getElementById("__bini_file_info");
-    if (fileInfoEl && err.file) {
-      fileInfoEl.textContent = shortenPath(err.file) + (err.line ? ":" + err.line : "");
-    } else if (fileInfoEl) {
-      fileInfoEl.textContent = '';
+      headingEl.textContent = errorTypeOf(err);
     }
 
     var contentEl = document.getElementById("__bini_error_content");
@@ -2096,20 +2529,70 @@ function biniErrorOverlay(): BiniPlugin {
     document.getElementById("__bini_current").textContent = currentIndex + 1;
     document.getElementById("__bini_total").textContent = errors.length;
 
+    applyFeedback();
     show();
+  }
+
+  function buildCodeFrame(err) {
+    var lines = err.codeLines || [];
+    if (!lines.length) return '';
+    var parsed = lines.map(parseCodeLine);
+    var width = 1;
+    parsed.forEach(function (p) { if (p.num.length > width) width = p.num.length; });
+    var out = [];
+    parsed.forEach(function (p) {
+      var num = new Array(width - p.num.length + 1).join(' ') + p.num;
+      out.push((p.isErr ? '> ' : '  ') + num + ' | ' + p.code);
+      if (p.isErr && err.column > 0) {
+        out.push('  ' + new Array(width + 1).join(' ') + ' | ' + new Array(err.column).join(' ') + '^');
+      }
+    });
+    return out.join('\\n');
+  }
+
+  function formatLocation(err) {
+    if (!err || !err.file) return '';
+    var shortFile = shortenPath(err.file);
+    var loc = 'at (' + shortFile;
+    if (err.line) loc += ':' + err.line + ':' + (err.column || 0);
+    loc += ')';
+    return loc;
   }
 
   function copyError() {
     var err = errors[currentIndex];
     if (!err) return;
-    var text = (err.name || "Error") + ": " + (err.originalMessage || err.message);
-    if (err.file) {
-      text += "\\n\\nFile: " + err.file;
-      if (err.line) text += ":" + err.line;
+    var parts = splitMessage(err.originalMessage || err.message);
+    var messageLines = [parts.headline].concat(parts.details).filter(Boolean);
+
+    var location = formatLocation(err);
+    if (location) {
+      if (messageLines.length === 0) {
+        messageLines.push(location);
+      } else {
+        var lastIdx = messageLines.length - 1;
+        if (messageLines[lastIdx].trim() === '') {
+          messageLines[lastIdx] = location;
+        } else {
+          messageLines.push('');
+          messageLines.push(location);
+        }
+      }
     }
-    if (err.plugin) text += "\\nPlugin: " + err.plugin;
-    if (err.componentStack) text += "\\n\\nComponent Stack:\\n" + err.componentStack;
-    text += "\\n\\n" + (err.stack || "");
+
+    var message = messageLines.join('\\n');
+    var text = '## Error Type\\n' + errorTypeOf(err) + '\\n\\n## Error Message\\n' + message;
+
+    var frames = parseStack(err.stack || '').user;
+    if (frames.length) {
+      text += '\\n\\n\\n' + frames.map(function (f) {
+        var loc = f.file + ':' + f.line;
+        return '    at ' + (f.fn ? f.fn + ' (' + loc + ')' : loc);
+      }).join('\\n');
+    }
+    var frame = buildCodeFrame(err);
+    if (frame) text += '\\n\\n## Code Frame\\n' + frame;
+    text += '\\n\\nBini.js (Rolldown)\\n';
     navigator.clipboard.writeText(text).catch(function() {});
   }
 
@@ -2193,7 +2676,6 @@ function biniErrorOverlay(): BiniPlugin {
       errors.push(err);
       prioritizeErrors();
       currentIndex = 0;
-      stackCollapsedState = {};
       frameworkFramesOpenState = {};
       ensureOverlay();
       prepareHighlights(err).then(function() { render(); });
@@ -2409,7 +2891,6 @@ function biniErrorOverlay(): BiniPlugin {
         errors = [];
       }
       currentIndex = Math.max(0, Math.min(currentIndex, errors.length - 1));
-      stackCollapsedState = {};
       frameworkFramesOpenState = {};
       if (errors.length === 0) {
         filteredCount = 0;
@@ -2425,7 +2906,6 @@ function biniErrorOverlay(): BiniPlugin {
       errors = [];
       filteredCount = 0;
       currentIndex = 0;
-      stackCollapsedState = {};
       frameworkFramesOpenState = {};
       updateBadge();
       hide();
@@ -2445,9 +2925,6 @@ function biniErrorOverlay(): BiniPlugin {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// PLUGIN 3 — Intercept vite-error-overlay
-// ─────────────────────────────────────────────────────────────
 function biniViteErrorInterceptPlugin(): BiniPlugin {
   return {
     name: 'bini-overlay:vite-intercept',
@@ -2476,9 +2953,6 @@ function biniViteErrorInterceptPlugin(): BiniPlugin {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// PLUGIN 4 — Code context API
-// ─────────────────────────────────────────────────────────────
 function biniCodeContextPlugin(): BiniPlugin {
   const fileCache = new Map<string, { mtimeMs: number; lines: string[] }>();
   const MAX_CACHE_ENTRIES = 64;
@@ -2585,13 +3059,8 @@ function biniCodeContextPlugin(): BiniPlugin {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// PLUGIN 5 — Sourcemap resolution API
-// ─────────────────────────────────────────────────────────────
 function biniSourcemapPlugin(): BiniPlugin {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let traceMod: any = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let traceModPromise: Promise<any | null> | null = null;
 
   function loadTraceModule(): Promise<any | null> {
@@ -2648,8 +3117,8 @@ function biniSourcemapPlugin(): BiniPlugin {
             candidates.push(baseStripped + file);
           }
 
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const graph: any = (server as any).moduleGraph;
+          const graph: any =
+            (server as any).environments?.client?.moduleGraph ?? (server as any).moduleGraph;
           if (!graph || typeof graph.getModuleByUrl !== 'function') {
             res.statusCode = 503;
             res.setHeader('Content-Type', 'application/json');
@@ -2657,10 +3126,9 @@ function biniSourcemapPlugin(): BiniPlugin {
             return;
           }
 
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           let mod: any = null;
           for (const cand of candidates) {
-            mod = graph.getModuleByUrl(cand, server);
+            mod = await graph.getModuleByUrl(cand);
             if (mod) break;
           }
 
@@ -2671,7 +3139,6 @@ function biniSourcemapPlugin(): BiniPlugin {
             return;
           }
 
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           let mapRaw: any = mod.transformResult.map;
           if (typeof mapRaw === 'string') {
             try {
@@ -2688,7 +3155,7 @@ function biniSourcemapPlugin(): BiniPlugin {
           }
 
           const trace = await loadTraceModule();
-          if (!trace || typeof trace.originalPositionFor !== 'function') {
+          if (!trace || typeof trace.originalPositionFor !== 'function' || typeof trace.TraceMap !== 'function') {
             res.statusCode = 503;
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ error: 'trace-mapping unavailable' }));
@@ -2697,7 +3164,8 @@ function biniSourcemapPlugin(): BiniPlugin {
 
           let pos: { source?: string; line?: number; column?: number } | null = null;
           try {
-            pos = trace.originalPositionFor(mapRaw, { line, column });
+            const traceMap = new trace.TraceMap(mapRaw);
+            pos = trace.originalPositionFor(traceMap, { line, column: Math.max(0, column - 1) });
           } catch {
             pos = null;
           }
@@ -2727,7 +3195,6 @@ function biniSourcemapPlugin(): BiniPlugin {
                 src = rel;
               }
             } catch {
-              // leave src as-is
             }
           }
 
@@ -2735,7 +3202,7 @@ function biniSourcemapPlugin(): BiniPlugin {
           res.end(JSON.stringify({
             file: src,
             line: pos.line || line,
-            column: pos.column || column,
+            column: (pos.column ?? column - 1) + 1,
           }));
         } catch {
           res.statusCode = 500;
@@ -2747,49 +3214,19 @@ function biniSourcemapPlugin(): BiniPlugin {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// PLUGIN 6 — Open in editor API
-// ─────────────────────────────────────────────────────────────
-function biniOpenEditorPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
-  const isWin = process.platform === 'win32';
-  const probe = isWin ? 'where' : 'which';
-  const candidates = options.editor
-    ? [options.editor]
-    : ['code', 'cursor', 'zed', 'subl', 'webstorm'];
+function biniOpenEditorPlugin(): BiniPlugin {
+  // Editor detection is fully delegated to `launch-editor`.
+  type LaunchFn = (
+    file: string,
+    onError?: (fileName: string, message: string | null) => void,
+  ) => void;
 
-  let resolvedEditor: string | null = null;
-  let probed = false;
-
-  function resolveEditor(): string | null {
-    if (probed) return resolvedEditor;
-    probed = true;
-    for (const bin of candidates) {
-      try {
-        execSync(`${probe} ${bin}`, { stdio: 'ignore' });
-        resolvedEditor = bin;
-        return resolvedEditor;
-      } catch {
-        continue;
-      }
+  let launchPromise: Promise<LaunchFn> | null = null;
+  function loadLauncher(): Promise<LaunchFn> {
+    if (!launchPromise) {
+      launchPromise = import('launch-editor').then((m: any) => (m.default ?? m) as LaunchFn);
     }
-    return null;
-  }
-
-  function buildArgs(bin: string, file: string, line: string): string[] {
-    switch (bin) {
-      case 'code':
-      case 'cursor':
-        return ['-g', `${file}:${line}`];
-      case 'zed':
-        return [`${file}:${line}`];
-      case 'subl':
-        return [`${file}:${line}`];
-      case 'webstorm':
-      case 'idea':
-        return ['--line', line, file];
-      default:
-        return ['-g', `${file}:${line}`];
-    }
+    return launchPromise;
   }
 
   return {
@@ -2807,6 +3244,7 @@ function biniOpenEditorPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
           const url = new URL(req.url || '', `http://${req.headers.host}`);
           const file = url.searchParams.get('file');
           const line = url.searchParams.get('line') || '1';
+          const column = url.searchParams.get('column') || '1';
 
           if (!file) {
             res.statusCode = 400;
@@ -2830,26 +3268,25 @@ function biniOpenEditorPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
             return;
           }
 
-          const editor = resolveEditor();
-          if (!editor) {
+          const lineNum = Math.max(1, parseInt(line, 10) || 1);
+          const colNum = Math.max(1, parseInt(column, 10) || 1);
+
+          let launch: LaunchFn;
+          try {
+            launch = await loadLauncher();
+          } catch {
             res.statusCode = 503;
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({
-              error: 'No supported editor found on PATH',
-              hint: 'Install code, cursor, zed, subl, or webstorm, or pass options.editor to biniOverlay().',
+              error: 'launch-editor is not installed',
+              hint: 'Run: npm i launch-editor',
             }));
             return;
           }
 
-          const args = buildArgs(editor, resolved, line);
-          try {
-            const child = spawn(editor, args, { stdio: 'ignore', detached: true });
-            child.unref();
-          } catch {
-            res.statusCode = 500;
-            res.end('Failed to launch editor');
-            return;
-          }
+          launch(`${resolved}:${lineNum}:${colNum}`, (_fileName, message) => {
+            console.warn('[bini-overlay] Could not open your editor' + (message ? ': ' + message : '') + '.');
+          });
 
           res.statusCode = 204;
           res.end();
@@ -2862,19 +3299,8 @@ function biniOpenEditorPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// PLUGIN 7 — Routes API for Bini Router
-// ─────────────────────────────────────────────────────────────
-function biniRoutesPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
-  const appDir = path.join(process.cwd(), options.appDir ?? 'src/app');
-
-  let routerModPromise: Promise<any | null> | null = null;
-  function loadRouterModule(): Promise<any | null> {
-    if (!routerModPromise) {
-      routerModPromise = import('bini-router').catch(() => null);
-    }
-    return routerModPromise;
-  }
+function biniRoutesPlugin(): BiniPlugin {
+  const appDir = path.join(process.cwd(), 'src/app');
 
   return {
     name: 'bini-overlay:routes',
@@ -2884,224 +3310,121 @@ function biniRoutesPlugin(options: BiniOverlayOptions = {}): BiniPlugin {
       const base = server.config.base || '/';
       const baseNoSlash = base.endsWith('/') ? base.slice(0, -1) : base;
 
+      let routerPromise: Promise<any> | null = null;
+      function loadRouter(): Promise<any> {
+        if (!routerPromise) {
+          routerPromise = import('bini-router');
+        }
+        return routerPromise;
+      }
+
+      void loadRouter();
+
       let manifestCache: any = null;
-      let manifestPromise: Promise<any | null> | null = null;
+      let manifestTime = 0;
+      const MANIFEST_TTL_MS = 200;
 
-      async function getManifest(): Promise<any | null> {
-        if (manifestCache) return manifestCache;
-        if (manifestPromise) return manifestPromise;
-        manifestPromise = (async () => {
-          const mod = await loadRouterModule();
-          if (!mod || typeof mod.generateRouteManifest !== 'function') {
-            manifestPromise = null;
-            return null;
-          }
-          manifestCache = mod.generateRouteManifest(appDir);
-          manifestPromise = null;
+      async function getManifest(mod: any): Promise<any> {
+        const now = Date.now();
+        if (manifestCache && now - manifestTime < MANIFEST_TTL_MS) {
           return manifestCache;
-        })();
-        return manifestPromise;
+        }
+        manifestCache = mod.generateRouteManifest(appDir);
+        manifestTime = now;
+        return manifestCache;
       }
 
-      let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
-      function scheduleInvalidate() {
-        if (invalidateTimer) clearTimeout(invalidateTimer);
-        invalidateTimer = setTimeout(() => {
-          invalidateTimer = null;
-          manifestCache = null;
-          manifestPromise = null;
-        }, 100);
-      }
-
-      const onFsEvent = (file: string) => {
-        const nf = file.replace(/\\/g, '/');
-        const nd = appDir.replace(/\\/g, '/').replace(/\/$/, '');
-        if (nf === nd || nf.startsWith(nd + '/')) scheduleInvalidate();
-      };
-      try {
-        server.watcher.on('add', onFsEvent);
-        server.watcher.on('unlink', onFsEvent);
-        server.watcher.on('change', onFsEvent);
-      } catch {
-        // watcher not available — fall back to always-fresh manifest
+      function normalizePath(input: string): string {
+        let p = input || '/';
+        if (baseNoSlash) {
+          if (p === baseNoSlash) p = '/';
+          else if (p.startsWith(baseNoSlash + '/')) p = p.slice(baseNoSlash.length) || '/';
+        }
+        if (p.length > 1) p = p.replace(/\/+$/, '');
+        return p || '/';
       }
 
       server.middlewares.use('/__bini_route_match', async (req: IncomingMessage, res: ServerResponse) => {
-        try {
-          if (!isSameOriginRequest(req)) {
-            rejectCrossOrigin(res);
-            return;
-          }
-
-          const url = new URL(req.url || '', `http://${req.headers.host}`);
-          let pathToMatch = url.searchParams.get('path') || '/';
-
-          if (baseNoSlash) {
-            if (pathToMatch === baseNoSlash) {
-              pathToMatch = '/';
-            } else if (pathToMatch.startsWith(baseNoSlash + '/')) {
-              pathToMatch = pathToMatch.slice(baseNoSlash.length) || '/';
-            }
-          }
-
-          if (pathToMatch.length > 1) {
-            pathToMatch = pathToMatch.replace(/\/+$/, '');
-          }
-
-          const mod = await loadRouterModule();
-          if (!mod || typeof mod.generateRouteManifest !== 'function') {
-            res.statusCode = 503;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({
-              type: 'not_found',
-              error: 'bini-router is not installed. Add it as a peer dependency to enable route introspection.',
-            }));
-            return;
-          }
-
-          const manifest = await getManifest();
-          if (!manifest) {
-            res.statusCode = 503;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ type: 'not_found' }));
-            return;
-          }
-
-          const result = mod.matchManifestRoute(manifest, pathToMatch);
-
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({
-            type: result.type,
-            path: pathToMatch,
-            routePath: result.routePath,
-          }));
-        } catch {
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ type: 'not_found' }));
+        if (!isSameOriginRequest(req)) {
+          rejectCrossOrigin(res);
+          return;
         }
+
+        const url = new URL(req.url || '', `http://${req.headers.host}`);
+        const pathToMatch = normalizePath(url.searchParams.get('path') || '/');
+
+        const mod = await loadRouter();
+        const manifest = await getManifest(mod);
+        const result = mod.matchManifestRoute(manifest, pathToMatch);
+
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
+          type: result.type,
+          path: pathToMatch,
+          routePath: result.routePath,
+        }));
       });
 
       server.middlewares.use('/__bini_route_info', async (req: IncomingMessage, res: ServerResponse) => {
-        try {
-          if (!isSameOriginRequest(req)) {
-            rejectCrossOrigin(res);
-            return;
-          }
+        if (!isSameOriginRequest(req)) {
+          rejectCrossOrigin(res);
+          return;
+        }
 
-          const url = new URL(req.url || '', `http://${req.headers.host}`);
-          let pathToMatch = url.searchParams.get('path') || '/';
+        const url = new URL(req.url || '', `http://${req.headers.host}`);
+        const pathToMatch = normalizePath(url.searchParams.get('path') || '/');
 
-          if (baseNoSlash) {
-            if (pathToMatch === baseNoSlash) {
-              pathToMatch = '/';
-            } else if (pathToMatch.startsWith(baseNoSlash + '/')) {
-              pathToMatch = pathToMatch.slice(baseNoSlash.length) || '/';
-            }
-          }
+        const mod = await loadRouter();
+        const manifest = await getManifest(mod);
+        const result = mod.matchManifestRoute(manifest, pathToMatch);
 
-          if (pathToMatch.length > 1) {
-            pathToMatch = pathToMatch.replace(/\/+$/, '');
-          }
-
-          const mod = await loadRouterModule();
-          if (!mod || typeof mod.generateRouteManifest !== 'function') {
-            res.statusCode = 200;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({
-              path: pathToMatch,
-              type: 'not_found',
-              segments: [],
-              layouts: [],
-              pageFile: '',
-              error: 'bini-router not installed',
-            }));
-            return;
-          }
-
-          const manifest = await getManifest();
-          if (!manifest) {
-            res.statusCode = 200;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({
-              path: pathToMatch,
-              type: 'not_found',
-              segments: [],
-              layouts: [],
-              pageFile: '',
-              error: 'manifest unavailable',
-            }));
-            return;
-          }
-
-          const result = mod.matchManifestRoute(manifest, pathToMatch);
-
-          // ── Critical fix ─────────────────────────────────────
-          // If the current path does NOT match any route, return
-          // empty segments. Otherwise the client would split the
-          // raw URL into fake "segments" and label them all static.
-          if (result.type === 'not_found') {
-            res.statusCode = 200;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({
-              path: pathToMatch,
-              type: 'not_found',
-              segments: [],
-              layouts: [],
-              pageFile: '',
-            }));
-            return;
-          }
-
-          const matchedKey = result.routePath;
-          const meta = manifest.metadata && manifest.metadata[matchedKey];
-
-          const segments: Array<{ name: string; kind: string; depth: number }> = [];
-          if (matchedKey && matchedKey !== '/') {
-            const parts = matchedKey.split('/').filter(Boolean);
-            for (let i = 0; i < parts.length; i++) {
-              const part = parts[i];
-              let kind = 'static';
-              if (part.startsWith(':')) kind = 'dynamic';
-              else if (part === '*') kind = 'catch-all';
-              segments.push({ name: part, kind, depth: i });
-            }
-          }
-
+        if (result.type === 'not_found') {
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({
-            path: matchedKey,
-            type: result.type,
-            segments,
-            layouts: (meta && meta.layouts) || [],
-            pageFile: (meta && meta.filePath) || '',
-          }));
-        } catch {
-          res.statusCode = 200;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({
-            path: '/',
+            path: pathToMatch,
             type: 'not_found',
             segments: [],
             layouts: [],
             pageFile: '',
-            error: 'route info failed',
           }));
+          return;
         }
+
+        const matchedKey = result.routePath;
+        const meta = manifest.metadata?.[matchedKey];
+
+        const segments: Array<{ name: string; kind: string; depth: number }> = [];
+        if (matchedKey && matchedKey !== '/') {
+          const parts = matchedKey.split('/').filter(Boolean);
+          for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            let kind = 'static';
+            if (part.startsWith(':')) kind = 'dynamic';
+            else if (part === '*') kind = 'catch-all';
+            segments.push({ name: part, kind, depth: i });
+          }
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
+          path: matchedKey,
+          type: result.type,
+          segments,
+          layouts: meta?.layouts || [],
+          pageFile: meta?.filePath || '',
+        }));
       });
     },
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// Public API
-// ─────────────────────────────────────────────────────────────
 export function biniOverlay(options: BiniOverlayOptions = {}): PluginOption[] {
   return [
+    biniFontPlugin(),
     biniCodeContextPlugin(),
     biniSourcemapPlugin(),
-    biniOpenEditorPlugin(options),
-    biniRoutesPlugin(options),
+    biniOpenEditorPlugin(),
+    biniRoutesPlugin(),
     biniViteErrorInterceptPlugin(),
     biniErrorOverlay(),
     biniLoadingPlugin(options),
